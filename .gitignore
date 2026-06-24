@@ -11,6 +11,8 @@ wheels/
 
 # Environment / secrets
 .env
+# direnv: local-only, sets UV_PROJECT_ENVIRONMENT to keep .venv out of iCloud
+.envrc
 
 # Local data + analytical database
 data/

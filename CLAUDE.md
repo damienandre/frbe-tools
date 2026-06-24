@@ -28,6 +28,15 @@ uv run pytest tests/test_clubs.py::TestBuildClubRow   # a single test class
 CI (`.github/workflows/ci.yml`) runs ruff check, ruff format --check, ty, and
 pytest on Python 3.14 — match it locally before pushing.
 
+**iCloud / venv gotcha (this repo lives under `~/Documents`, which iCloud syncs):**
+an in-tree `.venv` breaks intermittently — iCloud re-applies the macOS `hidden`
+flag to its files, and Python ≥3.12 ignores hidden `.pth` files, so the editable
+install silently stops resolving (`ModuleNotFoundError: No module named
+'frbe_tools'`). Fix is to keep the venv outside the synced tree via the
+(gitignored) `.envrc`, which sets `UV_PROJECT_ENVIRONMENT=$HOME/.venvs/frbe-tools`
+(needs `direnv`; run `direnv allow` once). If `uv run` ever fails with that
+import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIRONMENT" && uv sync`.
+
 ## Architecture
 
 `src/` layout package `frbe_tools`. Layers, in dependency order:
