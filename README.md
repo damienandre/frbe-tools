@@ -21,8 +21,8 @@ analyses (club rankings, club evolution over time, and more).
 | Feature | Command | State |
 | --- | --- | --- |
 | Export club admin data to CSV | `frbe clubs export` | ✅ implemented |
-| Scrape website DB dumps | `frbe scrape dumps` | 🚧 stub |
-| Consolidate snapshots in DuckDB | (library) | 🚧 stub |
+| Scrape player DB dumps | `frbe scrape players` | ✅ implemented |
+| Consolidate snapshots in DuckDB | `frbe db build` / `frbe db info` | ✅ implemented |
 | Club rankings / evolution | `frbe analyze …` | 🚧 stub |
 
 ## Install
@@ -38,16 +38,41 @@ uv sync
 ```bash
 uv run frbe --help
 uv run frbe clubs export                    # export all clubs to data/clubs.csv
-uv run frbe clubs export -o out.csv         # custom output path
-uv run frbe clubs export -c 20              # 20 parallel requests (default 10)
-uv run frbe -v clubs export                 # debug logging
+
+# Build the analytical database (requires credentials in .env, see below)
+uv run frbe scrape players                  # download player dumps -> data/player/
+uv run frbe db build                        # ingest dumps + clubs into DuckDB
+uv run frbe db info                         # summarize the database
 ```
 
-The export contains personal email addresses of club board members and is
-written into the gitignored `data/` directory by default — keep it out of
-version control.
+Outputs (club emails, player databases, the DuckDB file) are written into the
+gitignored `data/` directory — keep them out of version control.
 
 Also runnable as a module: `uv run python -m frbe_tools …`.
+
+## Database
+
+`frbe db build` consolidates the quarterly player dumps into a DuckDB star
+schema (`data/frbe.duckdb`):
+
+- **`player_snapshots`** — fact table, one row per player per quarter (the full
+  record: identity, club, affiliation, national Elo).
+- **`clubs`** / **`players`** — dimensions (clubs from the API; `players` is a
+  view giving each player's latest identity + lifecycle).
+- **`player_affiliations`** — time-dependent club membership
+  (`member` / `free_license` / `unaffiliated`).
+- **`player_rating_history`** — Elo evolution over time.
+
+Example queries (DuckDB):
+
+```sql
+-- clubs ranked by current members
+SELECT idclub, count(*) FROM player_affiliations
+WHERE period = '2026-07-01' AND status = 'member' GROUP BY idclub ORDER BY 2 DESC;
+
+-- a player's rating evolution
+SELECT period, elo FROM player_rating_history WHERE idplayer = 1104 ORDER BY period;
+```
 
 ## Configuration
 

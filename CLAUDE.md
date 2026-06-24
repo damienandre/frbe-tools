@@ -16,7 +16,10 @@ Uses [uv](https://docs.astral.sh/uv/) with Python 3.14.
 
 ```bash
 uv sync                                # install runtime + dev deps
-uv run frbe clubs export -o clubs.csv  # run the implemented feature
+uv run frbe clubs export               # export clubs -> data/clubs.csv
+uv run frbe scrape players             # download player dumps -> data/player/
+uv run frbe db build                   # ingest player dumps + clubs into DuckDB
+uv run frbe db info                    # summarize the database
 uv run python -m frbe_tools --help     # module entry point
 uv run ruff check                      # lint
 uv run ruff format                     # format
@@ -48,11 +51,34 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   the one `httpx.AsyncClient` factory (sizes the pool to `concurrency`, accepts a
   future bearer `token`). `clubs.py` holds endpoint calls; `models.py` holds the
   records (`ClubRow`) and defensive parsers.
-- **`sources/`** — non-API sources. `website.py` (stub) logs into
-  `GestionLogin.php` with `.env` credentials and downloads SQLite/DBF dumps.
-- **`db/store.py`** (stub) — DuckDB store. The intended flow is **api/sources →
-  db → analysis**: loaders ingest API rows and scraped dumps as dated snapshots.
+- **`sources/`** — non-API sources. `website.py` logs into the Players Manager
+  (`GestionLogin.php` → `Gestion.php` → `ELO/database.php`) with `.env`
+  credentials and downloads per-period player dumps (SQLite preferred, DBF
+  fallback) into `data/player/` as `player<YYYYMM>.{sqlite,dbf}`. Synchronous.
+- **`db/store.py`** — DuckDB store. Flow is **api/sources → db → analysis**.
+  `connect()` ensures the schema; `ingest_player_dir()` loads the dumps;
+  `load_clubs()` populates the club dim from the API. Bulk insert goes through a
+  Polars/Arrow frame (row-by-row `executemany` against the PK is ~90× slower).
 - **`analysis/`** (stub) — Polars analyses computed over the DuckDB store.
+
+### Database schema (`db/store.py`)
+
+Star schema. The **fact** `player_snapshots` has grain (period × player) and
+faithfully mirrors each quarterly dump's full record — descriptive attributes
+(name, sex, birthday, nationality, fide_id, died) live here too, because they
+vary over time. `period` is the quarter-start `DATE`. Dimensions: `clubs` (from
+the API) and `players` (a *derived view*: latest identity + first/last_seen +
+deceased_since). Views `player_affiliations` (status ∈ member/free_license/
+unaffiliated) and `player_rating_history` answer the time-dependent
+membership and rating-evolution questions. `source_files` records provenance.
+
+Two source eras are mapped to one canonical schema by `canonical_from_sqlite`
+(2018-10+, English fields) and `canonical_from_dbf` (2007–2018, French fields).
+Validated era mappings — change these only with care:
+- `affiliated`: SQLite `Affiliated`; DBF `NOT SUPPRESS`.
+- `free_license`: SQLite `G`; DBF always `False` (no such concept then).
+- `Fed` `*` → foreigner (`foreign_`); strip it for `region` (V/F/D).
+Parsing is tolerant (malformed numerics/dates → NULL); `idclub`/`fide_id` 0 → NULL.
 - **`commands/`** — one Typer sub-app per area (`clubs`, `scrape`, `analyze`),
   mounted onto the root app in `cli.py` (entry point `frbe = frbe_tools.cli:app`).
 

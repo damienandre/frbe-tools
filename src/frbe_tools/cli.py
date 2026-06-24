@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from frbe_tools import __version__
-from frbe_tools.commands import analyze, clubs, scrape
+from frbe_tools.commands import analyze, clubs, db, scrape
 
 app = typer.Typer(
     name="frbe",
@@ -18,6 +18,7 @@ app = typer.Typer(
 
 app.add_typer(clubs.app, name="clubs")
 app.add_typer(scrape.app, name="scrape")
+app.add_typer(db.app, name="db")
 app.add_typer(analyze.app, name="analyze")
 
 
