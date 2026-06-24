@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Clubs · frbe-tools{% endblock %}
+{% block content %}
+<h1>Clubs by player count</h1>
+<form class="filters" hx-get="/clubs/table" hx-target="#results" hx-swap="innerHTML"
+      hx-trigger="change delay:150ms, keyup delay:400ms" hx-push-url="false">
+  <label>Period <input type="text" name="period" value="{{ form.period or '' }}" placeholder="latest"></label>
+  <label>Status
+    <select name="status">
+      {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Sex
+    <select name="sex">
+      {% for s in ['any', 'M', 'F'] %}<option value="{{ s }}" {{ 'selected' if form.sex == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Min age <input type="number" name="min_age" min="0" max="120" value="{{ form.min_age if form.min_age is not none else '' }}"></label>
+  <label>Max age <input type="number" name="max_age" min="0" max="120" value="{{ form.max_age if form.max_age is not none else '' }}"></label>
+  <label>Origin
+    <select name="foreign">
+      <option value="any" {{ 'selected' if form.foreign == 'any' }}>any</option>
+      <option value="no" {{ 'selected' if form.foreign == 'no' }}>Belgian</option>
+      <option value="yes" {{ 'selected' if form.foreign == 'yes' }}>foreign</option>
+    </select>
+  </label>
+  <label>Region
+    <select name="region">
+      {% for s in ['any', 'V', 'F', 'D'] %}<option value="{{ s }}" {{ 'selected' if form.region == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="check"><input type="checkbox" name="rated" value="true" {{ 'checked' if form.rated }}> rated only</label>
+  <label class="check"><input type="checkbox" name="new" value="true" {{ 'checked' if form.new }}> new this period</label>
+  <label>Limit <input type="number" name="limit" min="1" max="500" value="{{ form.limit }}"></label>
+</form>
+<div id="results">{% include "_table.html" %}</div>
+{% endblock %}

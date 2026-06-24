@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Club {{ idclub }} · frbe-tools{% endblock %}
+{% block content %}
+<h1>{{ name or 'Club' }} <span class="muted">#{{ idclub }}</span></h1>
+<form class="filters" method="get" action="/clubs/{{ idclub }}">
+  <label>Month <input type="number" name="month" min="1" max="12" value="{{ month if month is not none else '' }}" placeholder="all"></label>
+  <label>Youth age <input type="number" name="youth_age" min="0" max="120" value="{{ youth_age }}"></label>
+  <button type="submit">Apply</button>
+  <a class="btn" href="/clubs">← all clubs</a>
+</form>
+{% if rows %}
+<div class="charts">
+  <div class="card"><canvas id="countsChart"></canvas></div>
+  <div class="card"><canvas id="eloChart"></canvas></div>
+</div>
+{% endif %}
+{% include "_table.html" %}
+{% endblock %}
+{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block scripts %}
+<script id="chart-data" type="application/json">{{ chart | safe }}</script>
+<script>
+  const d = JSON.parse(document.getElementById('chart-data').textContent);
+  if (d.labels.length) {
+    new Chart(document.getElementById('countsChart'), {
+      type: 'line',
+      data: { labels: d.labels, datasets: [
+        { label: 'members', data: d.members },
+        { label: 'women', data: d.women },
+        { label: 'youth', data: d.youth },
+      ] },
+      options: { responsive: true, interaction: { mode: 'index', intersect: false } }
+    });
+    new Chart(document.getElementById('eloChart'), {
+      type: 'line',
+      data: { labels: d.labels, datasets: [{ label: 'avg Elo', data: d.avg_elo }] },
+      options: { responsive: true, spanGaps: true }
+    });
+  }
+</script>
+{% endblock %}

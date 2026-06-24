@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Player {{ idplayer }} · frbe-tools{% endblock %}
+{% block content %}
+<h1>{{ name or 'Player' }} <span class="muted">#{{ idplayer }}</span></h1>
+{% if rows %}
+<div class="card"><canvas id="eloChart"></canvas></div>
+{% endif %}
+{% include "_table.html" %}
+{% endblock %}
+{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block scripts %}
+<script id="chart-data" type="application/json">{{ chart | safe }}</script>
+<script>
+  const d = JSON.parse(document.getElementById('chart-data').textContent);
+  if (d.labels.length) {
+    new Chart(document.getElementById('eloChart'), {
+      type: 'line',
+      data: { labels: d.labels, datasets: [{ label: 'national Elo', data: d.elo }] },
+      options: { responsive: true, spanGaps: true }
+    });
+  }
+</script>
+{% endblock %}

@@ -24,6 +24,7 @@ analyses (club rankings, club evolution over time, and more).
 | Scrape player DB dumps | `frbe scrape players` | ✅ implemented |
 | Consolidate snapshots in DuckDB | `frbe db build` / `frbe db info` | ✅ implemented |
 | Club & player rankings | `frbe analyze …` | ✅ implemented |
+| Local web dashboard | `frbe web` | ✅ implemented |
 
 ## Install
 
@@ -96,6 +97,23 @@ uv run frbe analyze movers 202401 --club 901       # best movers within one club
 Ages use birth-year cohorts (the chess youth-category convention: "under 20 in
 2026" = born 2007+).
 
+## Web UI
+
+`frbe web` serves a local dashboard (FastAPI + Jinja2 + HTMX) over the same
+analyses — interactive filtering, plus Elo/membership charts for individual
+clubs and players. It opens the DuckDB store **read-only**, so it is safe to run
+while `frbe db build` runs.
+
+```bash
+uv run frbe web                 # http://127.0.0.1:8080
+uv run frbe web --port 9000     # override the port (flag > FRBE_WEB_PORT > 8080)
+```
+
+Pages: overview, club rankings, strength, growth, movers, and per-club /
+per-player detail (with charts). Filters update the results table in place via
+HTMX — no page reloads. htmx and Chart.js are vendored under `web/static/`, so
+the UI works offline.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored.
@@ -107,6 +125,8 @@ Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored.
 | `FRBE_DB_PATH` | DuckDB database path | `data/frbe.duckdb` |
 | `FRBE_USERNAME` | Manager-site login (for `scrape`) | — |
 | `FRBE_PASSWORD` | Manager-site password (for `scrape`) | — |
+| `FRBE_WEB_HOST` | `frbe web` bind address | `127.0.0.1` |
+| `FRBE_WEB_PORT` | `frbe web` port | `8080` |
 
 ## Development
 

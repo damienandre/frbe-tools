@@ -15,6 +15,9 @@ from dotenv import load_dotenv
 DEFAULT_API_BASE = "https://www.frbe-kbsb-ksb.be/api/v1"
 DEFAULT_DATA_DIR = Path("data")
 DEFAULT_DB_PATH = Path("data/frbe.duckdb")
+DEFAULT_WEB_HOST = "127.0.0.1"
+# 8080, not 8000, to avoid clashing with a continuously-running chesstide server.
+DEFAULT_WEB_PORT = 8080
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +29,8 @@ class Settings:
     db_path: Path = DEFAULT_DB_PATH
     username: str | None = None
     password: str | None = None
+    web_host: str = DEFAULT_WEB_HOST
+    web_port: int = DEFAULT_WEB_PORT
 
     @property
     def has_credentials(self) -> bool:
@@ -48,4 +53,6 @@ def load_settings(*, env_file: str | os.PathLike[str] | None = None) -> Settings
         db_path=Path(os.getenv("FRBE_DB_PATH", str(DEFAULT_DB_PATH))),
         username=os.getenv("FRBE_USERNAME") or None,
         password=os.getenv("FRBE_PASSWORD") or None,
+        web_host=os.getenv("FRBE_WEB_HOST", DEFAULT_WEB_HOST),
+        web_port=int(os.getenv("FRBE_WEB_PORT", str(DEFAULT_WEB_PORT))),
     )

@@ -1,0 +1,24 @@
+{% if rows %}
+<table>
+  <thead>
+    <tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr>
+  </thead>
+  <tbody>
+    {% for row in rows %}
+    <tr>
+      {% for c in columns %}
+        {% set val = row[c] %}
+        {% if links and c in links and val is not none %}
+          <td><a href="{{ links[c].format(val) }}">{{ val }}</a></td>
+        {% else %}
+          <td class="{{ 'num' if val is number else '' }}">{{ '' if val is none else val }}</td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+<p class="muted">{{ rows|length }} row(s){% if period is defined %} · as of {{ period }}{% endif %}</p>
+{% else %}
+<p class="muted">No results for these filters.</p>
+{% endif %}

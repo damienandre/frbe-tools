@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}{{ status }} · frbe-tools{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ status }}</h1>
+  <p>{{ detail }}</p>
+  {% if status == 503 %}
+  <p class="muted">Build the analytical database first:</p>
+  <pre>uv run frbe scrape players
+uv run frbe db build</pre>
+  {% endif %}
+  <p><a href="/">← Back to overview</a></p>
+</section>
+{% endblock %}

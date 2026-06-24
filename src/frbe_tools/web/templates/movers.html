@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Movers · frbe-tools{% endblock %}
+{% block content %}
+<h1>Biggest Elo movers</h1>
+<form class="filters" hx-get="/movers/table" hx-target="#results" hx-swap="innerHTML"
+      hx-trigger="change delay:150ms, keyup delay:400ms" hx-push-url="false">
+  <label>Baseline <input type="text" name="baseline" value="{{ form.baseline }}" placeholder="YYYYMM"></label>
+  <label>Period <input type="text" name="period" value="{{ form.period or '' }}" placeholder="latest"></label>
+  <label>Club <input type="number" name="club" value="{{ form.club if form.club is not none else '' }}" placeholder="all"></label>
+  <label>Status
+    <select name="status">
+      {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="check"><input type="checkbox" name="losers" value="true" {{ 'checked' if form.losers }}> losers</label>
+  <label>Limit <input type="number" name="limit" min="1" max="500" value="{{ form.limit }}"></label>
+</form>
+<div id="results">{% include "_table.html" %}</div>
+{% endblock %}

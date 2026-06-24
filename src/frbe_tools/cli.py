@@ -8,7 +8,7 @@ from typing import Annotated
 import typer
 
 from frbe_tools import __version__
-from frbe_tools.commands import analyze, clubs, db, scrape
+from frbe_tools.commands import analyze, clubs, db, scrape, web
 
 app = typer.Typer(
     name="frbe",
@@ -20,6 +20,7 @@ app.add_typer(clubs.app, name="clubs")
 app.add_typer(scrape.app, name="scrape")
 app.add_typer(db.app, name="db")
 app.add_typer(analyze.app, name="analyze")
+app.command(name="web")(web.serve)
 
 
 def _version_callback(value: bool) -> None:
