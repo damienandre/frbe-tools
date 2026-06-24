@@ -1,37 +1,47 @@
-"""``frbe scrape`` commands (website database dumps). Stub."""
+"""``frbe scrape`` commands (Players Manager database dumps)."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from frbe_tools.config import load_settings
-from frbe_tools.sources.website import DumpFormat, download_dumps
+from frbe_tools.sources.website import (
+    DEFAULT_REQUEST_DELAY,
+    LoginError,
+    download_player_dumps,
+)
 
-app = typer.Typer(help="Scrape database dumps from the manager website.", no_args_is_help=True)
+app = typer.Typer(help="Scrape database dumps from the Players Manager site.", no_args_is_help=True)
 
 
 @app.command()
-def dumps(
-    fmt: Annotated[
-        str,
-        typer.Option("--format", "-f", help="Dump format: sqlite or dbf."),
-    ] = "sqlite",
+def players(
+    dest: Annotated[
+        Path | None,
+        typer.Option("--dest", "-d", help="Output directory (default: <data_dir>/player)."),
+    ] = None,
+    delay: Annotated[
+        float,
+        typer.Option("--delay", min=0.0, help="Seconds between downloads (server politeness)."),
+    ] = DEFAULT_REQUEST_DELAY,
+    overwrite: Annotated[
+        bool,
+        typer.Option("--overwrite", help="Re-download files that already exist."),
+    ] = False,
 ) -> None:
-    """Download the federation database dump (requires website credentials)."""
-    settings = load_settings()
-    if not settings.has_credentials:
-        typer.echo(
-            "Missing credentials: set FRBE_USERNAME and FRBE_PASSWORD in your .env.",
-            err=True,
-        )
-        raise typer.Exit(code=2)
+    """Download every available player database (SQLite preferred, DBF fallback).
 
-    dump_format: DumpFormat = "dbf" if fmt == "dbf" else "sqlite"
+    Each period is saved, unzipped and renamed, as player<YYYYMM>.{sqlite,dbf}.
+    Requires FRBE_USERNAME / FRBE_PASSWORD in your .env.
+    """
+    settings = load_settings()
     try:
-        path = download_dumps(settings, settings.data_dir, fmt=dump_format)
-    except NotImplementedError as exc:
-        typer.echo(f"Not implemented yet: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(f"Downloaded dump to {path}")
+        saved = download_player_dumps(settings, dest_dir=dest, delay=delay, overwrite=overwrite)
+    except LoginError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    typer.echo(f"Saved {len(saved)} player files to {saved[0].parent if saved else dest}")
