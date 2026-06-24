@@ -90,6 +90,7 @@ uv run frbe analyze club-history 230               # one club's metrics over tim
 uv run frbe analyze club-history 230 --month 7     # July snapshots only (no seasonal noise)
 uv run frbe analyze player 1104                    # a player's Elo history
 uv run frbe analyze movers 202401                  # biggest Elo gainers since 2024-01
+uv run frbe analyze movers 202401 --club 901       # best movers within one club
 ```
 
 Ages use birth-year cohorts (the chess youth-category convention: "under 20 in

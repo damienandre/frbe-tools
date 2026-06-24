@@ -129,6 +129,11 @@ class TestPlayerRankings:
         df = rank_rating_changes(_con(), "2026-01-01", "2025-01-01", ascending=True)
         assert df.row(0, named=True)["idplayer"] == 4  # -50
 
+    def test_movers_club_filter(self) -> None:
+        # club 10 only has player 1 rated in both periods; player 4 (club 20) excluded
+        df = rank_rating_changes(_con(), "2026-01-01", "2025-01-01", idclub=10)
+        assert df["idplayer"].to_list() == [1]
+
 
 class TestLatestPeriod:
     def test_latest_period(self) -> None:

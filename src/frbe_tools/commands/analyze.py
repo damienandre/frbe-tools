@@ -177,6 +177,9 @@ def club_history_cmd(
 def movers(
     baseline: Annotated[str, typer.Argument(help="Baseline period (YYYY-MM-DD or YYYYMM).")],
     period: PeriodOpt = None,
+    club: Annotated[
+        int | None, typer.Option("--club", "-c", help="Restrict to players in this club.")
+    ] = None,
     losers: Annotated[
         bool, typer.Option("--losers", help="Show biggest losers instead of gainers.")
     ] = False,
@@ -189,7 +192,8 @@ def movers(
     per = _resolve_period(con, period)
     base = _resolve_period(con, baseline)
     df = rank_rating_changes(
-        con, per, base, statuses=_statuses(status), limit=limit, ascending=losers
+        con, per, base, statuses=_statuses(status), idclub=club, limit=limit, ascending=losers
     )
-    typer.echo(f"Biggest {'losers' if losers else 'gainers'} from {base} to {per}:")
+    scope = f" in club {club}" if club is not None else ""
+    typer.echo(f"Biggest {'losers' if losers else 'gainers'}{scope} from {base} to {per}:")
     _show(df)

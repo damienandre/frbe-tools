@@ -287,6 +287,7 @@ def rank_rating_changes(
     baseline: dt.date | str,
     *,
     statuses: tuple[str, ...] = ("member",),
+    idclub: int | None = None,
     limit: int = 20,
     ascending: bool = False,
 ) -> pl.DataFrame:
@@ -294,14 +295,20 @@ def rank_rating_changes(
 
     Descending = biggest gainers; ``ascending=True`` = biggest losers. Only
     players rated (elo > 0) in both periods and matching ``statuses`` at
-    ``period`` are considered. Columns: rank, idplayer, name, elo_then, elo_now, delta.
+    ``period`` are considered. Pass ``idclub`` to restrict to players in that
+    club at ``period``. Columns: rank, idplayer, name, elo_then, elo_now, delta.
     """
     status_sql, status_params = _status_clause(statuses)
     order = "ASC" if ascending else "DESC"
+    cur_where = ["period = ?", "elo > 0", status_sql]
+    cur_params: list[Any] = [period, *status_params]
+    if idclub is not None:
+        cur_where.append("idclub = ?")
+        cur_params.append(idclub)
     sql = f"""
         WITH cur AS (
             SELECT idplayer, elo FROM player_snapshots
-            WHERE period = ? AND elo > 0 AND {status_sql}
+            WHERE {" AND ".join(cur_where)}
         ),
         base AS (
             SELECT idplayer, elo FROM player_snapshots WHERE period = ? AND elo > 0
@@ -317,5 +324,5 @@ def rank_rating_changes(
         ORDER BY delta {order}, cur.idplayer
         LIMIT ?
     """
-    params = [period, *status_params, baseline, limit]
+    params = [*cur_params, baseline, limit]
     return con.execute(sql, params).pl().with_row_index("rank", offset=1)
