@@ -20,6 +20,7 @@ uv run frbe clubs export               # export clubs -> data/clubs.csv
 uv run frbe scrape players             # download player dumps -> data/player/
 uv run frbe db build                   # ingest player dumps + clubs into DuckDB
 uv run frbe db info                    # summarize the database
+uv run frbe analyze clubs --max-age 19 # rank clubs (here: youth); also strength/growth/player/movers
 uv run python -m frbe_tools --help     # module entry point
 uv run ruff check                      # lint
 uv run ruff format                     # format
@@ -59,7 +60,13 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   `connect()` ensures the schema; `ingest_player_dir()` loads the dumps;
   `load_clubs()` populates the club dim from the API. Bulk insert goes through a
   Polars/Arrow frame (row-by-row `executemany` against the PK is ~90× slower).
-- **`analysis/`** (stub) — Polars analyses computed over the DuckDB store.
+- **`analysis/rankings.py`** — club/player rankings over the store, each "as of"
+  a period, returning Polars frames: `rank_clubs` (one parameterized count
+  function: status/age/sex/foreign/region/rated/new), `rank_clubs_by_strength`
+  (Elo aggregates incl. top-N boards), `rank_clubs_by_growth` (between two
+  periods), `player_rating_evolution`, `rank_rating_changes`. Ages use
+  **birth-year cohorts** (`year - birth_year`). Status presets in
+  `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
 
 ### Database schema (`db/store.py`)
 

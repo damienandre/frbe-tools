@@ -1,39 +1,171 @@
-"""``frbe analyze`` commands (analyses over the consolidated store). Stub."""
+"""``frbe analyze`` commands: club and player rankings over the DuckDB store."""
 
 from __future__ import annotations
 
+import datetime as dt
+from typing import Annotated
+
+import polars as pl
 import typer
 
-from frbe_tools.analysis.rankings import club_evolution, club_rankings
+from frbe_tools.analysis.rankings import (
+    STATUS_PRESETS,
+    latest_period,
+    player_rating_evolution,
+    rank_clubs,
+    rank_clubs_by_growth,
+    rank_clubs_by_strength,
+    rank_rating_changes,
+)
 from frbe_tools.config import load_settings
 from frbe_tools.db.store import connect
 
 app = typer.Typer(help="Analyze consolidated federation data.", no_args_is_help=True)
 
+PeriodOpt = Annotated[
+    str | None, typer.Option("--period", "-p", help="YYYY-MM-DD or YYYYMM (default: latest).")
+]
+StatusOpt = Annotated[str, typer.Option("--status", help=f"One of: {', '.join(STATUS_PRESETS)}.")]
+LimitOpt = Annotated[int, typer.Option("--limit", "-n", help="Number of rows to show.")]
 
-@app.command()
-def rankings() -> None:
-    """Show club rankings from the most recent snapshot."""
-    settings = load_settings()
+
+def _resolve_period(con, raw: str | None) -> dt.date:
+    if raw is None:
+        return latest_period(con)
+    digits = raw.replace("-", "")
+    if len(digits) == 6 and digits.isdigit():
+        return dt.date(int(digits[:4]), int(digits[4:6]), 1)
+    return dt.date.fromisoformat(raw)
+
+
+def _statuses(preset: str) -> tuple[str, ...]:
     try:
-        con = connect(settings.db_path)
-        frame = club_rankings(con)
-    except NotImplementedError as exc:
-        typer.echo(f"Not implemented yet: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(frame)
+        return STATUS_PRESETS[preset]
+    except KeyError as exc:
+        raise typer.BadParameter(f"status must be one of {', '.join(STATUS_PRESETS)}") from exc
+
+
+def _show(df: pl.DataFrame) -> None:
+    with pl.Config(tbl_rows=200, tbl_hide_dataframe_shape=True, fmt_str_lengths=40):
+        typer.echo(str(df))
 
 
 @app.command()
-def evolution(
-    idclub: int | None = typer.Option(None, help="Restrict to a single club id."),
+def clubs(
+    period: PeriodOpt = None,
+    status: StatusOpt = "member",
+    sex: Annotated[str | None, typer.Option("--sex", help="M or F.")] = None,
+    min_age: Annotated[int | None, typer.Option("--min-age", help="Inclusive cohort age.")] = None,
+    max_age: Annotated[int | None, typer.Option("--max-age", help="Inclusive cohort age.")] = None,
+    foreign: Annotated[bool | None, typer.Option("--foreign/--belgian")] = None,
+    region: Annotated[str | None, typer.Option("--region", help="V, F or D.")] = None,
+    rated: Annotated[bool, typer.Option("--rated", help="Only rated (elo>0) players.")] = False,
+    new: Annotated[bool, typer.Option("--new", help="Only players new this period.")] = False,
+    limit: LimitOpt = 20,
 ) -> None:
-    """Show how clubs evolve across snapshots over time."""
+    """Rank clubs by player count, filtered by status/age/gender/etc."""
     settings = load_settings()
+    con = connect(settings.db_path)
+    per = _resolve_period(con, period)
+    df = rank_clubs(
+        con,
+        per,
+        statuses=_statuses(status),
+        sex=sex,
+        min_age=min_age,
+        max_age=max_age,
+        foreign=foreign,
+        region=region,
+        rated_only=rated,
+        new_only=new,
+        limit=limit,
+    )
+    typer.echo(f"Clubs by {status} players as of {per}:")
+    _show(df)
+
+
+@app.command()
+def strength(
+    period: PeriodOpt = None,
+    metric: Annotated[
+        str, typer.Option("--metric", help="avg_elo, median_elo, max_elo, top_n_sum.")
+    ] = "avg_elo",
+    top_n: Annotated[int, typer.Option("--top-n", help="Boards for top_n_sum.")] = 4,
+    status: StatusOpt = "member",
+    min_players: Annotated[
+        int, typer.Option("--min-players", help="Drop clubs below this many rated players.")
+    ] = 4,
+    limit: LimitOpt = 20,
+) -> None:
+    """Rank clubs by an Elo aggregate (strength)."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    per = _resolve_period(con, period)
     try:
-        con = connect(settings.db_path)
-        frame = club_evolution(con, idclub=idclub)
-    except NotImplementedError as exc:
-        typer.echo(f"Not implemented yet: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-    typer.echo(frame)
+        df = rank_clubs_by_strength(
+            con,
+            per,
+            metric=metric,
+            top_n=top_n,
+            statuses=_statuses(status),
+            min_players=min_players,
+            limit=limit,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    typer.echo(f"Clubs by {metric} as of {per}:")
+    _show(df)
+
+
+@app.command()
+def growth(
+    baseline: Annotated[str, typer.Argument(help="Baseline period (YYYY-MM-DD or YYYYMM).")],
+    period: PeriodOpt = None,
+    status: StatusOpt = "member",
+    limit: LimitOpt = 20,
+) -> None:
+    """Rank clubs by membership change between two periods."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    per = _resolve_period(con, period)
+    base = _resolve_period(con, baseline)
+    df = rank_clubs_by_growth(con, per, base, statuses=_statuses(status), limit=limit)
+    typer.echo(f"Club {status} growth from {base} to {per}:")
+    _show(df)
+
+
+@app.command()
+def player(
+    idplayer: Annotated[int, typer.Argument(help="Player matricule.")],
+) -> None:
+    """Show a player's national-Elo evolution over time."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    df = player_rating_evolution(con, idplayer)
+    if df.is_empty():
+        typer.echo(f"No rating history for player {idplayer}.")
+        raise typer.Exit(code=1)
+    typer.echo(f"Rating evolution for player {idplayer}:")
+    _show(df)
+
+
+@app.command()
+def movers(
+    baseline: Annotated[str, typer.Argument(help="Baseline period (YYYY-MM-DD or YYYYMM).")],
+    period: PeriodOpt = None,
+    losers: Annotated[
+        bool, typer.Option("--losers", help="Show biggest losers instead of gainers.")
+    ] = False,
+    status: StatusOpt = "member",
+    limit: LimitOpt = 20,
+) -> None:
+    """Rank players by biggest Elo gain (or loss) between two periods."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    per = _resolve_period(con, period)
+    base = _resolve_period(con, baseline)
+    df = rank_rating_changes(
+        con, per, base, statuses=_statuses(status), limit=limit, ascending=losers
+    )
+    typer.echo(f"Biggest {'losers' if losers else 'gainers'} from {base} to {per}:")
+    _show(df)

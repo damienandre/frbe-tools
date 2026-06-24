@@ -23,7 +23,7 @@ analyses (club rankings, club evolution over time, and more).
 | Export club admin data to CSV | `frbe clubs export` | ✅ implemented |
 | Scrape player DB dumps | `frbe scrape players` | ✅ implemented |
 | Consolidate snapshots in DuckDB | `frbe db build` / `frbe db info` | ✅ implemented |
-| Club rankings / evolution | `frbe analyze …` | 🚧 stub |
+| Club & player rankings | `frbe analyze …` | ✅ implemented |
 
 ## Install
 
@@ -73,6 +73,25 @@ WHERE period = '2026-07-01' AND status = 'member' GROUP BY idclub ORDER BY 2 DES
 -- a player's rating evolution
 SELECT period, elo FROM player_rating_history WHERE idplayer = 1104 ORDER BY period;
 ```
+
+## Analysis
+
+`frbe analyze` ranks clubs and players over the store (defaults to the latest
+period; pass `--period YYYYMM` for a historical one):
+
+```bash
+uv run frbe analyze clubs                          # clubs by members
+uv run frbe analyze clubs --status registered      # members + free licences
+uv run frbe analyze clubs --max-age 19             # youth (under-20 cohort)
+uv run frbe analyze clubs --sex F                  # women members
+uv run frbe analyze strength --metric top_n_sum    # top-4-board strength
+uv run frbe analyze growth 201601                  # member growth since 2016-01
+uv run frbe analyze player 1104                    # a player's Elo history
+uv run frbe analyze movers 202401                  # biggest Elo gainers since 2024-01
+```
+
+Ages use birth-year cohorts (the chess youth-category convention: "under 20 in
+2026" = born 2007+).
 
 ## Configuration
 
