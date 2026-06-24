@@ -1,0 +1,74 @@
+[project]
+name = "frbe-tools"
+version = "0.1.0"
+description = "Tools to access and analyze data of the Belgian chess federation (FRBE/KBSB/KSB/RBCF)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.14"
+authors = [{ name = "Damien Andre", email = "damien.andre.spy@gmail.com" }]
+keywords = ["chess", "frbe", "kbsb", "ksb", "rbcf", "data"]
+classifiers = [
+    "Programming Language :: Python :: 3.14",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Games/Entertainment :: Board Games",
+]
+dependencies = [
+    "httpx>=0.28.1",
+    "typer>=0.16.0",
+    "duckdb>=1.1.0",
+    # 1.41+ uses a split-runtime packaging (polars-runtime-*) that does not
+    # resolve reliably across environments; stay on the monolithic builds.
+    "polars>=1.18.0,<1.41.0",
+    "python-dotenv>=1.0.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/damienandre/frbe-tools"
+Repository = "https://github.com/damienandre/frbe-tools"
+
+[project.scripts]
+frbe = "frbe_tools.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/frbe_tools"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9.0",
+    "ty>=0.0.1a6",
+    "pytest>=8.3.0",
+    "pre-commit>=4.0.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "C4",  # flake8-comprehensions
+    "RUF", # ruff-specific
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["B"]
+
+[tool.ty.environment]
+python-version = "3.14"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
