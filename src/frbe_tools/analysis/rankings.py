@@ -242,15 +242,24 @@ def club_history(
     idclub: int,
     *,
     youth_max_age: int = 19,
+    month: int | None = None,
 ) -> pl.DataFrame:
-    """Return one club's metrics across every period (a time series).
+    """Return one club's metrics across periods (a time series).
 
     Columns: period, members, registered, free_license, women, youth (members in
     the under-``youth_max_age+1`` birth-year cohort for that period's year),
     foreign, avg_elo. Ordered oldest first.
+
+    Pass ``month`` (1-12) to keep only periods in that calendar month — e.g.
+    ``month=7`` compares every July snapshot, removing seasonal effects.
     """
+    where = ["idclub = ?"]
+    params: list[Any] = [youth_max_age, idclub]
+    if month is not None:
+        where.append("extract('month' FROM period) = ?")
+        params.append(month)
     return con.execute(
-        """
+        f"""
         SELECT
             period,
             count(*) FILTER (WHERE affiliated) AS members,
@@ -264,11 +273,11 @@ def club_history(
             count(*) FILTER (WHERE affiliated AND foreign_) AS foreign,
             round(avg(elo) FILTER (WHERE affiliated AND elo > 0), 1) AS avg_elo
         FROM player_snapshots
-        WHERE idclub = ?
+        WHERE {" AND ".join(where)}
         GROUP BY period
         ORDER BY period
         """,
-        [youth_max_age, idclub],
+        params,
     ).pl()
 
 

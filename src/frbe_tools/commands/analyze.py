@@ -153,12 +153,16 @@ def player(
 @app.command("club-history")
 def club_history_cmd(
     idclub: Annotated[int, typer.Argument(help="Club id.")],
+    month: Annotated[
+        int | None,
+        typer.Option("--month", "-m", min=1, max=12, help="Only this month, e.g. 7 (July)."),
+    ] = None,
     youth_age: Annotated[int, typer.Option("--youth-age", help="Upper youth cohort age.")] = 19,
 ) -> None:
     """Show one club's metrics (members, youth, women, strength) over time."""
     settings = load_settings()
     con = connect(settings.db_path)
-    df = club_history(con, idclub, youth_max_age=youth_age)
+    df = club_history(con, idclub, youth_max_age=youth_age, month=month)
     if df.is_empty():
         typer.echo(f"No history for club {idclub}.")
         raise typer.Exit(code=1)

@@ -108,6 +108,11 @@ class TestClubHistory:
         assert now["foreign"] == 1  # player 3
         assert abs(now["avg_elo"] - 1900.0) < 0.01
 
+    def test_month_filter_keeps_only_that_month(self) -> None:
+        # seed has Jan periods only; month=7 -> empty, month=1 -> both periods
+        assert club_history(_con(), 10, month=7).is_empty()
+        assert club_history(_con(), 10, month=1).height == 2
+
 
 class TestPlayerRankings:
     def test_rating_evolution(self) -> None:
