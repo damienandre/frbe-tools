@@ -64,7 +64,8 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   a period, returning Polars frames: `rank_clubs` (one parameterized count
   function: status/age/sex/foreign/region/rated/new), `rank_clubs_by_strength`
   (Elo aggregates incl. top-N boards), `rank_clubs_by_growth` (between two
-  periods), `player_rating_evolution`, `rank_rating_changes`. Ages use
+  periods), `club_history` (one club's metrics across all periods),
+  `player_rating_evolution`, `rank_rating_changes`. Ages use
   **birth-year cohorts** (`year - birth_year`). Status presets in
   `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
 

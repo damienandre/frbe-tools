@@ -86,6 +86,7 @@ uv run frbe analyze clubs --max-age 19             # youth (under-20 cohort)
 uv run frbe analyze clubs --sex F                  # women members
 uv run frbe analyze strength --metric top_n_sum    # top-4-board strength
 uv run frbe analyze growth 201601                  # member growth since 2016-01
+uv run frbe analyze club-history 230               # one club's metrics over time
 uv run frbe analyze player 1104                    # a player's Elo history
 uv run frbe analyze movers 202401                  # biggest Elo gainers since 2024-01
 ```

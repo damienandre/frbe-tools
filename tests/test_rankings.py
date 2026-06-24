@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime as dt
 
 from frbe_tools.analysis.rankings import (
+    club_history,
     latest_period,
     player_rating_evolution,
     rank_clubs,
@@ -93,6 +94,19 @@ class TestStrengthAndGrowth:
         by_club = {r["idclub"]: r for r in df.to_dicts()}
         assert by_club[10]["count_then"] == 1 and by_club[10]["count_now"] == 3
         assert by_club[10]["delta"] == 2
+
+
+class TestClubHistory:
+    def test_history_per_period(self) -> None:
+        df = club_history(_con(), 10)
+        rows = {r["period"]: r for r in df.to_dicts()}
+        assert rows[dt.date(2025, 1, 1)]["members"] == 1
+        now = rows[dt.date(2026, 1, 1)]
+        assert now["members"] == 3
+        assert now["women"] == 1  # player 3
+        assert now["youth"] == 1  # player 2 (born 2010, under 20 in 2026)
+        assert now["foreign"] == 1  # player 3
+        assert abs(now["avg_elo"] - 1900.0) < 0.01
 
 
 class TestPlayerRankings:

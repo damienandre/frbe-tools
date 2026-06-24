@@ -10,6 +10,7 @@ import typer
 
 from frbe_tools.analysis.rankings import (
     STATUS_PRESETS,
+    club_history,
     latest_period,
     player_rating_evolution,
     rank_clubs,
@@ -18,7 +19,7 @@ from frbe_tools.analysis.rankings import (
     rank_rating_changes,
 )
 from frbe_tools.config import load_settings
-from frbe_tools.db.store import connect
+from frbe_tools.db.store import connect, scalar
 
 app = typer.Typer(help="Analyze consolidated federation data.", no_args_is_help=True)
 
@@ -146,6 +147,25 @@ def player(
         typer.echo(f"No rating history for player {idplayer}.")
         raise typer.Exit(code=1)
     typer.echo(f"Rating evolution for player {idplayer}:")
+    _show(df)
+
+
+@app.command("club-history")
+def club_history_cmd(
+    idclub: Annotated[int, typer.Argument(help="Club id.")],
+    youth_age: Annotated[int, typer.Option("--youth-age", help="Upper youth cohort age.")] = 19,
+) -> None:
+    """Show one club's metrics (members, youth, women, strength) over time."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    df = club_history(con, idclub, youth_max_age=youth_age)
+    if df.is_empty():
+        typer.echo(f"No history for club {idclub}.")
+        raise typer.Exit(code=1)
+    name = scalar(
+        con, "SELECT coalesce(name_short, name_long) FROM clubs WHERE idclub = ?", [idclub]
+    )
+    typer.echo(f"History for club {idclub}{f' ({name})' if name else ''}:")
     _show(df)
 
 

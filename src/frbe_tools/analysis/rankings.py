@@ -237,6 +237,41 @@ def player_rating_evolution(
     ).pl()
 
 
+def club_history(
+    con: duckdb.DuckDBPyConnection,
+    idclub: int,
+    *,
+    youth_max_age: int = 19,
+) -> pl.DataFrame:
+    """Return one club's metrics across every period (a time series).
+
+    Columns: period, members, registered, free_license, women, youth (members in
+    the under-``youth_max_age+1`` birth-year cohort for that period's year),
+    foreign, avg_elo. Ordered oldest first.
+    """
+    return con.execute(
+        """
+        SELECT
+            period,
+            count(*) FILTER (WHERE affiliated) AS members,
+            count(*) FILTER (WHERE affiliated OR free_license) AS registered,
+            count(*) FILTER (WHERE free_license AND NOT affiliated) AS free_license,
+            count(*) FILTER (WHERE affiliated AND sex = 'F') AS women,
+            count(*) FILTER (
+                WHERE affiliated
+                AND extract('year' FROM birthday) >= extract('year' FROM period) - ?
+            ) AS youth,
+            count(*) FILTER (WHERE affiliated AND foreign_) AS foreign,
+            round(avg(elo) FILTER (WHERE affiliated AND elo > 0), 1) AS avg_elo
+        FROM player_snapshots
+        WHERE idclub = ?
+        GROUP BY period
+        ORDER BY period
+        """,
+        [youth_max_age, idclub],
+    ).pl()
+
+
 def rank_rating_changes(
     con: duckdb.DuckDBPyConnection,
     period: dt.date | str,
