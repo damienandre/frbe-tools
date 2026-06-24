@@ -101,8 +101,12 @@ Ages use birth-year cohorts (the chess youth-category convention: "under 20 in
 
 `frbe web` serves a local dashboard (FastAPI + Jinja2 + HTMX) over the same
 analyses — interactive filtering, plus Elo/membership charts for individual
-clubs and players. It opens the DuckDB store **read-only**, so it is safe to run
-while `frbe db build` runs.
+clubs and players. Each request opens the DuckDB store **read-only** and closes
+it when the response is sent, so the UI coexists with `frbe db build`: a rebuild
+started while the UI is idle proceeds normally, and a page loaded during the
+brief moment a rebuild holds the write lock returns a "try again shortly" message
+rather than failing hard. (DuckDB allows either one writer or many readers, so a
+request *exactly* overlapping a rebuild is the only contention point.)
 
 ```bash
 uv run frbe web                 # http://127.0.0.1:8080

@@ -6,11 +6,14 @@ dumps live only in the environment / ``.env`` file and are never committed.
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_API_BASE = "https://www.frbe-kbsb-ksb.be/api/v1"
 DEFAULT_DATA_DIR = Path("data")
@@ -38,6 +41,22 @@ class Settings:
         return bool(self.username and self.password)
 
 
+def _int_env(name: str, default: int) -> int:
+    """Read an integer env var, falling back to ``default`` on a malformed value.
+
+    Defensive on purpose: a bad ``FRBE_WEB_PORT`` must not crash every command
+    (``load_settings`` is called by all of them), only ignore the typo.
+    """
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        logger.warning("Ignoring invalid %s=%r; using %d.", name, raw, default)
+        return default
+
+
 def load_settings(*, env_file: str | os.PathLike[str] | None = None) -> Settings:
     """Build :class:`Settings` from environment variables.
 
@@ -54,5 +73,5 @@ def load_settings(*, env_file: str | os.PathLike[str] | None = None) -> Settings
         username=os.getenv("FRBE_USERNAME") or None,
         password=os.getenv("FRBE_PASSWORD") or None,
         web_host=os.getenv("FRBE_WEB_HOST", DEFAULT_WEB_HOST),
-        web_port=int(os.getenv("FRBE_WEB_PORT", str(DEFAULT_WEB_PORT))),
+        web_port=_int_env("FRBE_WEB_PORT", DEFAULT_WEB_PORT),
     )

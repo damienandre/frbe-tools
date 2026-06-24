@@ -89,6 +89,31 @@ def test_club_and_player_detail(tmp_path: Path) -> None:
     assert "Old Strong" in rp.text and "eloChart" in rp.text
 
 
+def test_request_releases_lock_for_concurrent_writer(tmp_path: Path) -> None:
+    # After a request, the read lock must be released so `db build` (read-write)
+    # can reopen the file. A process-lifetime cached connection would block it.
+    db = tmp_path / "frbe.duckdb"
+    _seeded_db(db)
+    client = TestClient(create_app(Settings(db_path=db)))
+    assert client.get("/clubs/table", params={"status": "member"}).status_code == 200
+    writer = connect(db)  # would raise if the UI still held the read lock
+    writer.execute("INSERT INTO clubs (idclub, name_short) VALUES (30, 'Gamma')")
+    writer.close()
+
+
+def test_request_during_rebuild_returns_503(tmp_path: Path) -> None:
+    db = tmp_path / "frbe.duckdb"
+    _seeded_db(db)
+    client = TestClient(create_app(Settings(db_path=db)), raise_server_exceptions=False)
+    writer = connect(db)  # simulate `db build` holding the write lock
+    try:
+        r = client.get("/clubs/table", params={"status": "member"})
+        assert r.status_code == 503
+        assert "busy" in r.text.lower()
+    finally:
+        writer.close()
+
+
 def test_missing_database_returns_503(tmp_path: Path) -> None:
     client = TestClient(
         create_app(Settings(db_path=tmp_path / "nope.duckdb")), raise_server_exceptions=False

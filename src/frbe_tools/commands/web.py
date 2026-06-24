@@ -21,8 +21,9 @@ def serve(
 ) -> None:
     """Launch the local web UI for browsing club and player analyses.
 
-    Reads the DuckDB store read-only, so it is safe to run alongside other
-    commands. Precedence for host/port: CLI flag > ``FRBE_WEB_*`` env > default.
+    Reads the DuckDB store read-only, one short-lived connection per request, so
+    it coexists with ``frbe db build`` (which needs the write lock). Precedence
+    for host/port: CLI flag > ``FRBE_WEB_*`` env > default.
     """
     import uvicorn
 

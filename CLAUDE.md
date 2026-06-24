@@ -72,9 +72,13 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
 - **`web/`** — local dashboard (FastAPI + Jinja2 + HTMX), a thin presentation
   layer over `analysis/rankings.py`. `app.create_app(settings)` is the factory
   (plus a module-level `app` for `uvicorn …:app`); routes return full pages and
-  HTMX table fragments (`/<area>` page + `/<area>/table` fragment). It opens the
-  store **read-only** (`store.connect(..., read_only=True)`) so it never takes the
-  write lock `db build` needs. htmx + Chart.js are vendored under `web/static/`.
+  HTMX table fragments (`/<area>` page + `/<area>/table` fragment). The `get_db`
+  dependency opens a **read-only** `store.connect(..., read_only=True)` *per
+  request* and closes it in a `finally` — important, because a DuckDB read lock
+  held for the process lifetime would block `db build` (verified: it raises
+  "Conflicting lock is held"). Per-request open/close means the lock is only held
+  in-flight; a request landing mid-rebuild returns a 503. htmx + Chart.js are
+  vendored under `web/static/`.
 
 ### Database schema (`db/store.py`)
 

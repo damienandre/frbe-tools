@@ -2,13 +2,15 @@
 
 Every ranking page is a GET form; HTMX swaps just the results table on each
 filter change (``hx-get`` -> ``.../table``). The DuckDB store is opened
-read-only and shared across requests via per-request cursors.
+read-only with one short-lived connection per request (closed afterwards, so it
+does not hold a lock that would block ``frbe db build``).
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import json
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -74,19 +76,29 @@ def _none(value: str | None) -> str | None:
     return value or None if value not in ("", "any") else None
 
 
-def get_db(request: Request) -> duckdb.DuckDBPyConnection:
-    """Return a per-request cursor over the shared read-only DuckDB connection."""
-    state = request.app.state
-    con = getattr(state, "con", None)
-    if con is None:
-        if not Path(state.db_path).exists():
-            raise HTTPException(
-                status_code=503,
-                detail="Database not found. Run `frbe db build` first.",
-            )
-        con = connect(state.db_path, read_only=True)
-        state.con = con
-    return con.cursor()
+def get_db(request: Request) -> Iterator[duckdb.DuckDBPyConnection]:
+    """Yield a short-lived read-only connection, closed when the request ends.
+
+    Opening per request (rather than caching for the process lifetime) keeps the
+    DuckDB read lock held only while a request is in flight, so ``frbe db build``
+    can open the file read-write whenever the UI is idle. A request that lands
+    mid-rebuild gets a clean 503 instead of a stack trace.
+    """
+    db_path = request.app.state.db_path
+    if not Path(db_path).exists():
+        raise HTTPException(
+            status_code=503, detail="Database not found. Run `frbe db build` first."
+        )
+    try:
+        con = connect(db_path, read_only=True)
+    except duckdb.Error as exc:  # e.g. a conflicting lock while `db build` writes
+        raise HTTPException(
+            status_code=503, detail="Database is busy (being rebuilt?). Try again shortly."
+        ) from exc
+    try:
+        yield con
+    finally:
+        con.close()
 
 
 DbDep = Annotated[duckdb.DuckDBPyConnection, Depends(get_db)]
@@ -105,7 +117,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
     application = FastAPI(title="frbe-tools", docs_url=None, redoc_url=None)
     application.state.db_path = settings.db_path
-    application.state.con = None
     application.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
 
     @application.exception_handler(StarletteHTTPException)
