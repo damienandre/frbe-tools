@@ -61,6 +61,15 @@ def test_clubs_table_youth_filter(tmp_path: Path) -> None:
     assert "Beta" not in r.text
 
 
+def test_partial_or_invalid_period_degrades_to_latest(tmp_path: Path) -> None:
+    # Mid-typing keystrokes (2024) and out-of-range months (202413) must not 500.
+    client = _client(tmp_path)
+    for raw in ("2024", "20240", "202413", "garbage"):
+        r = client.get("/clubs/table", params={"period": raw, "status": "member"})
+        assert r.status_code == 200, raw
+        assert "Alpha" in r.text  # falls back to the latest period
+
+
 def test_strength_growth_movers_tables(tmp_path: Path) -> None:
     client = _client(tmp_path)
     assert client.get("/strength/table", params={"min_players": 1}).status_code == 200

@@ -132,6 +132,11 @@ Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored.
 | `FRBE_WEB_HOST` | `frbe web` bind address | `127.0.0.1` |
 | `FRBE_WEB_PORT` | `frbe web` port | `8080` |
 
+> ⚠️ The web UI is **unauthenticated** and exposes the full local player
+> database. The default `127.0.0.1` keeps it on your machine only; setting
+> `FRBE_WEB_HOST=0.0.0.0` (or `--host 0.0.0.0`) publishes it to your whole LAN —
+> only do that on a network you trust.
+
 ## Development
 
 ```bash

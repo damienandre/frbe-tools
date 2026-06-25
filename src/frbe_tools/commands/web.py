@@ -12,7 +12,11 @@ from frbe_tools.config import load_settings
 def serve(
     host: Annotated[
         str | None,
-        typer.Option("--host", help="Bind address (default: FRBE_WEB_HOST or 127.0.0.1)."),
+        typer.Option(
+            "--host",
+            help="Bind address (default: FRBE_WEB_HOST or 127.0.0.1). "
+            "0.0.0.0 exposes the unauthenticated UI to the LAN.",
+        ),
     ] = None,
     port: Annotated[
         int | None,

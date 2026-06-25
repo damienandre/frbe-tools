@@ -50,13 +50,22 @@ def df_to_table(df: pl.DataFrame) -> tuple[list[str], list[dict[str, Any]]]:
 
 
 def parse_period(con: duckdb.DuckDBPyConnection, raw: str | None) -> dt.date:
-    """Resolve a ``YYYYMM`` / ``YYYY-MM-DD`` string (or None -> latest period)."""
-    if not raw:
-        return latest_period(con)
-    digits = raw.replace("-", "")
-    if len(digits) == 6 and digits.isdigit():
-        return dt.date(int(digits[:4]), int(digits[4:6]), 1)
-    return dt.date.fromisoformat(raw)
+    """Resolve a ``YYYYMM`` / ``YYYY-MM-DD`` string to a period date.
+
+    Empty or *unparseable* input falls back to the latest period. The forms type
+    a period a character at a time (``hx-trigger`` on keyup), so partial strings
+    (``2024``) and out-of-range values (``202413``) must degrade gracefully
+    rather than raise — otherwise every intermediate keystroke would 500.
+    """
+    if raw:
+        digits = raw.replace("-", "")
+        try:
+            if len(digits) == 6 and digits.isdigit():
+                return dt.date(int(digits[:4]), int(digits[4:6]), 1)
+            return dt.date.fromisoformat(raw)
+        except ValueError:
+            pass
+    return latest_period(con)
 
 
 def statuses_for(preset: str) -> tuple[str, ...]:
@@ -73,7 +82,7 @@ def _tri(value: str | None) -> bool | None:
 
 def _none(value: str | None) -> str | None:
     """Treat empty/``any`` selects as 'no filter'."""
-    return value or None if value not in ("", "any") else None
+    return None if value in ("", "any", None) else value
 
 
 def get_db(request: Request) -> Iterator[duckdb.DuckDBPyConnection]:
