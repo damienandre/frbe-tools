@@ -21,6 +21,7 @@ uv run frbe scrape players             # download player dumps -> data/player/
 uv run frbe db build                   # ingest player dumps + clubs into DuckDB
 uv run frbe db info                    # summarize the database
 uv run frbe analyze clubs --max-age 19 # rank clubs (here: youth); also strength/growth/player/movers
+uv run frbe web                        # local dashboard at http://127.0.0.1:8080
 uv run python -m frbe_tools --help     # module entry point
 uv run ruff check                      # lint
 uv run ruff format                     # format
@@ -68,6 +69,16 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   `player_rating_evolution`, `rank_rating_changes`. Ages use
   **birth-year cohorts** (`year - birth_year`). Status presets in
   `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
+- **`web/`** — local dashboard (FastAPI + Jinja2 + HTMX), a thin presentation
+  layer over `analysis/rankings.py`. `app.create_app(settings)` is the factory
+  (plus a module-level `app` for `uvicorn …:app`); routes return full pages and
+  HTMX table fragments (`/<area>` page + `/<area>/table` fragment). The `get_db`
+  dependency opens a **read-only** `store.connect(..., read_only=True)` *per
+  request* and closes it in a `finally` — important, because a DuckDB read lock
+  held for the process lifetime would block `db build` (verified: it raises
+  "Conflicting lock is held"). Per-request open/close means the lock is only held
+  in-flight; a request landing mid-rebuild returns a 503. htmx + Chart.js are
+  vendored under `web/static/`.
 
 ### Database schema (`db/store.py`)
 
@@ -87,8 +98,10 @@ Validated era mappings — change these only with care:
 - `free_license`: SQLite `G`; DBF always `False` (no such concept then).
 - `Fed` `*` → foreigner (`foreign_`); strip it for `region` (V/F/D).
 Parsing is tolerant (malformed numerics/dates → NULL); `idclub`/`fide_id` 0 → NULL.
-- **`commands/`** — one Typer sub-app per area (`clubs`, `scrape`, `analyze`),
-  mounted onto the root app in `cli.py` (entry point `frbe = frbe_tools.cli:app`).
+- **`commands/`** — one Typer sub-app per area (`clubs`, `scrape`, `db`,
+  `analyze`), mounted onto the root app in `cli.py` (entry point
+  `frbe = frbe_tools.cli:app`). `web` is the exception: a single root command
+  (`app.command(name="web")(web.serve)`), not a sub-app.
 
 The API tiers matter when extending: `anon` (public, no auth), `clb` (club-level,
 bearer token), `mgmt` (federation admin). Only `anon` is wired up.
@@ -107,7 +120,14 @@ bearer token), `mgmt` (federation admin). Only `anon` is wired up.
 - **DuckDB snapshots.** All ingested data is tagged with a `snapshot_date` so
   analyses can compare clubs/members over time — keep that when filling stubs.
 - **Async tests without a plugin.** Tests drive async code via `asyncio.run()`
-  and mock HTTP with `httpx.MockTransport` (no pytest-asyncio dependency).
+  and mock HTTP with `httpx.MockTransport` (no pytest-asyncio dependency). Web
+  routes are tested with `fastapi.testclient.TestClient` over a seeded temp
+  DuckDB (`tests/test_web.py`).
+- **Web dependency injection (gotcha).** The shared filter-param dependencies in
+  `web/app.py` are injected via the default-value form (`p: dict = Depends(...)`),
+  *not* `Annotated[dict, Depends(...)]`: FastAPI treats a `dict`-typed `Annotated`
+  param as a query model and 422s. Hence the `B008` per-file ignore in
+  `pyproject.toml` — keep both together.
 - Stubs raise `NotImplementedError` with a message describing the intended
   behavior; CLI commands catch it and exit cleanly. Replace the body, keep the
   signature.

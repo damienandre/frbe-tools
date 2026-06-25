@@ -361,8 +361,15 @@ def _read_dbf_rows(path: Path) -> Iterator[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # Connection + schema
 # --------------------------------------------------------------------------- #
-def connect(db_path: Path | str) -> duckdb.DuckDBPyConnection:
-    """Open (creating if needed) the DuckDB database and ensure the schema."""
+def connect(db_path: Path | str, *, read_only: bool = False) -> duckdb.DuckDBPyConnection:
+    """Open the DuckDB database and (unless read-only) ensure the schema.
+
+    ``read_only=True`` opens an existing database without creating it or running
+    the schema DDL — used by the web UI so it never takes the write lock that
+    ``frbe db build`` needs. It raises if the database file does not exist yet.
+    """
+    if read_only:
+        return duckdb.connect(str(db_path), read_only=True)
     if isinstance(db_path, Path):
         db_path.parent.mkdir(parents=True, exist_ok=True)
     con = duckdb.connect(str(db_path))

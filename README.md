@@ -24,6 +24,7 @@ analyses (club rankings, club evolution over time, and more).
 | Scrape player DB dumps | `frbe scrape players` | ✅ implemented |
 | Consolidate snapshots in DuckDB | `frbe db build` / `frbe db info` | ✅ implemented |
 | Club & player rankings | `frbe analyze …` | ✅ implemented |
+| Local web dashboard | `frbe web` | ✅ implemented |
 
 ## Install
 
@@ -96,6 +97,27 @@ uv run frbe analyze movers 202401 --club 901       # best movers within one club
 Ages use birth-year cohorts (the chess youth-category convention: "under 20 in
 2026" = born 2007+).
 
+## Web UI
+
+`frbe web` serves a local dashboard (FastAPI + Jinja2 + HTMX) over the same
+analyses — interactive filtering, plus Elo/membership charts for individual
+clubs and players. Each request opens the DuckDB store **read-only** and closes
+it when the response is sent, so the UI coexists with `frbe db build`: a rebuild
+started while the UI is idle proceeds normally, and a page loaded during the
+brief moment a rebuild holds the write lock returns a "try again shortly" message
+rather than failing hard. (DuckDB allows either one writer or many readers, so a
+request *exactly* overlapping a rebuild is the only contention point.)
+
+```bash
+uv run frbe web                 # http://127.0.0.1:8080
+uv run frbe web --port 9000     # override the port (flag > FRBE_WEB_PORT > 8080)
+```
+
+Pages: overview, club rankings, strength, growth, movers, and per-club /
+per-player detail (with charts). Filters update the results table in place via
+HTMX — no page reloads. htmx and Chart.js are vendored under `web/static/`, so
+the UI works offline.
+
 ## Configuration
 
 Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored.
@@ -107,6 +129,13 @@ Copy `.env.example` to `.env` and fill in what you need. `.env` is gitignored.
 | `FRBE_DB_PATH` | DuckDB database path | `data/frbe.duckdb` |
 | `FRBE_USERNAME` | Manager-site login (for `scrape`) | — |
 | `FRBE_PASSWORD` | Manager-site password (for `scrape`) | — |
+| `FRBE_WEB_HOST` | `frbe web` bind address | `127.0.0.1` |
+| `FRBE_WEB_PORT` | `frbe web` port | `8080` |
+
+> ⚠️ The web UI is **unauthenticated** and exposes the full local player
+> database. The default `127.0.0.1` keeps it on your machine only; setting
+> `FRBE_WEB_HOST=0.0.0.0` (or `--host 0.0.0.0`) publishes it to your whole LAN —
+> only do that on a network you trust.
 
 ## Development
 

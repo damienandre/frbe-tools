@@ -25,6 +25,10 @@ dependencies = [
     "dbfread>=2.0.7",
     # Arrow backs the fast bulk insert of snapshot frames into DuckDB.
     "pyarrow>=18.0.0",
+    # Local web UI (`frbe web`): FastAPI + Jinja2 templates served by uvicorn.
+    "fastapi>=0.115.0",
+    "uvicorn>=0.34.0",
+    "jinja2>=3.1.4",
 ]
 
 [project.urls]
@@ -68,6 +72,8 @@ select = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["B"]
+# FastAPI's dependency-injection idiom is `param = Depends(...)` in defaults.
+"src/frbe_tools/web/app.py" = ["B008"]
 
 [tool.ty.environment]
 python-version = "3.14"

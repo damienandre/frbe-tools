@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Overview · frbe-tools{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Belgian chess federation data</h1>
+  <p class="muted">Local analytical view over the consolidated player snapshots.</p>
+  <div class="stats">
+    <div><span class="big">{{ summary.latest }}</span><label>latest period</label></div>
+    <div><span class="big">{{ "{:,}".format(summary.players) }}</span><label>players (all time)</label></div>
+    <div><span class="big">{{ "{:,}".format(summary.members) }}</span><label>members now</label></div>
+    <div><span class="big">{{ summary.clubs }}</span><label>active clubs</label></div>
+    <div><span class="big">{{ summary.periods }}</span><label>periods loaded</label></div>
+  </div>
+</section>
+<section class="grid">
+  <a class="card link" href="/clubs"><h3>Clubs →</h3><p>Rank clubs by members, youth, women, region…</p></a>
+  <a class="card link" href="/strength"><h3>Strength →</h3><p>Rank clubs by Elo aggregates and top boards.</p></a>
+  <a class="card link" href="/growth"><h3>Growth →</h3><p>Membership change between two periods.</p></a>
+  <a class="card link" href="/movers"><h3>Movers →</h3><p>Biggest Elo gainers and losers.</p></a>
+</section>
+{% endblock %}

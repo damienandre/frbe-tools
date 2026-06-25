@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Strength · frbe-tools{% endblock %}
+{% block content %}
+<h1>Clubs by Elo strength</h1>
+<form class="filters" hx-get="/strength/table" hx-target="#results" hx-swap="innerHTML"
+      hx-trigger="change delay:150ms, keyup delay:400ms" hx-push-url="false">
+  <label>Period <input type="text" name="period" value="{{ form.period or '' }}" placeholder="latest"></label>
+  <label>Metric
+    <select name="metric">
+      {% for m in metrics %}<option value="{{ m }}" {{ 'selected' if form.metric == m }}>{{ m }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Top N <input type="number" name="top_n" min="1" max="20" value="{{ form.top_n }}"></label>
+  <label>Status
+    <select name="status">
+      {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Min rated <input type="number" name="min_players" min="1" max="100" value="{{ form.min_players }}"></label>
+  <label>Limit <input type="number" name="limit" min="1" max="500" value="{{ form.limit }}"></label>
+</form>
+<div id="results">{% include "_table.html" %}</div>
+{% endblock %}
