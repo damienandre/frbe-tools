@@ -41,8 +41,18 @@
   if (d.labels.length) {
     new Chart(document.getElementById('distChart'), {
       type: 'bar',
-      data: { labels: d.labels, datasets: [{ label: 'players', data: d.players }] },
-      options: { responsive: true, plugins: { legend: { display: false } } }
+      data: { labels: d.labels, datasets: [
+        { type: 'bar', label: 'players', data: d.players, order: 2 },
+        { type: 'line', label: 'density', data: d.density, order: 1,
+          borderColor: '#d9480f', borderWidth: 2, tension: 0.4,
+          pointRadius: 0, fill: false, spanGaps: false },
+      ] },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: true } },
+        scales: { y: { beginAtZero: true } }
+      }
     });
   }
 </script>

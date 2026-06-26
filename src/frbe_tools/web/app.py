@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import math
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Any
@@ -107,6 +108,28 @@ def _opt_int(raw: str | None, *, lo: int | None = None, hi: int | None = None) -
     if hi is not None:
         n = min(hi, n)
     return n
+
+
+def _density_curve(counts: list[int], *, bandwidth: float = 1.0) -> list[float]:
+    """Gaussian-smoothed density over equally-spaced histogram bins.
+
+    A binned kernel-density estimate evaluated at the bin centres: each bin is
+    a weighted average of its neighbours under a Gaussian kernel (``bandwidth``
+    in bin units). The result is rescaled to sum to the original total so the
+    curve overlays directly on the same count axis as the bars.
+    """
+    n = len(counts)
+    if n == 0:
+        return []
+    smoothed = [
+        sum(c * math.exp(-0.5 * ((j - k) / bandwidth) ** 2) for k, c in enumerate(counts))
+        for j in range(n)
+    ]
+    total = sum(counts)
+    scale = sum(smoothed)
+    if scale == 0:
+        return [0.0] * n
+    return [round(s * total / scale, 2) for s in smoothed]
 
 
 def get_db(request: Request) -> Iterator[duckdb.DuckDBPyConnection]:
@@ -440,7 +463,17 @@ def _register_routes(app: FastAPI) -> None:
             include_unrated=not p["hide_unrated"],
         )
         cols, rows = df_to_table(df)
-        chart = {"labels": [r["bucket"] for r in rows], "players": [r["players"] for r in rows]}
+        labels = [r["bucket"] for r in rows]
+        players = [r["players"] for r in rows]
+        # Smooth a density curve over the numeric bands only; the categorical
+        # "unrated" bucket has no position on the axis, so leave a gap (None) there.
+        numeric = [
+            (i, p) for i, (b, p) in enumerate(zip(labels, players, strict=True)) if b != "unrated"
+        ]
+        density: list[float | None] = [None] * len(labels)
+        for (i, _), value in zip(numeric, _density_curve([p for _, p in numeric]), strict=True):
+            density[i] = value
+        chart = {"labels": labels, "players": players, "density": density}
         return TEMPLATES.TemplateResponse(
             request,
             "distribution.html",
