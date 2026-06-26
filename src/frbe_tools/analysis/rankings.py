@@ -304,6 +304,11 @@ def player_distribution(
     uses birth-year cohorts (``year - birth_year``); players with an unknown
     birthday are skipped.
 
+    Unlike ``rank_clubs`` & co this intentionally does *not* require
+    ``idclub IS NOT NULL`` — the histogram counts everyone in scope, so for
+    ``statuses`` that include club-less players (``all``/``unaffiliated``) the
+    global/region total won't equal the sum of the per-club distributions.
+
     Returns columns: bucket (label, e.g. ``1600-1699`` / ``10-19`` / ``unrated``),
     players, pct (share of the total, rounded to 0.1%). Ordered low band first.
     """
@@ -335,6 +340,9 @@ def player_distribution(
     if width <= 0:
         raise ValueError("bin_size must be a positive integer.")
 
+    # SECURITY: width and year are interpolated into the SQL string, not bound as
+    # parameters. This is injection-safe only because both are guaranteed ints
+    # (int(bin_size) above; _period_year -> int). Keep them ints if refactoring.
     sql = f"""
         SELECT {low_sql.format(w=width)} AS low, count(*) AS players
         FROM player_snapshots ps

@@ -87,12 +87,14 @@ def _none(value: str | None) -> str | None:
 
 
 def _opt_int(raw: str | None, *, lo: int | None = None, hi: int | None = None) -> int | None:
-    """Coerce an optional numeric query field to int; blank/invalid/out-of-range -> None.
+    """Coerce an optional numeric query field to int; blank/non-numeric -> None.
 
     Plain-GET forms submit empty number inputs as ``""``, which 422 an ``int |
     None`` query param. Distribution parses these defensively (like
     ``parse_period`` does for the period field) so a blank field means "no
-    filter" / "use the default" rather than an error.
+    filter" / "use the default" rather than an error. An in-range value is
+    returned as-is; an out-of-range one is *clamped* to ``lo``/``hi`` (so e.g.
+    ``bin=2000`` becomes the max bin, not a silent fall-back to the default).
     """
     if raw is None or raw.strip() == "":
         return None
@@ -100,8 +102,10 @@ def _opt_int(raw: str | None, *, lo: int | None = None, hi: int | None = None) -
         n = int(raw)
     except ValueError:
         return None
-    if (lo is not None and n < lo) or (hi is not None and n > hi):
-        return None
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
     return n
 
 
@@ -419,6 +423,9 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/distribution", response_class=HTMLResponse)
     def distribution_page(request: Request, db: DbDep, p: dict = Depends(_distribution_params)):
         per = parse_period(db, p["period"])
+        # Web layer degrades gracefully on bad input (like parse_period / the
+        # _strength metric fallback): an unknown dimension renders the default
+        # rather than 400-ing, whereas the CLI / player_distribution raise.
         dimension = p["dimension"] if p["dimension"] in DISTRIBUTION_DIMENSIONS else "rating"
         df = player_distribution(
             db,

@@ -8,7 +8,19 @@ from fastapi.testclient import TestClient
 
 from frbe_tools.config import Settings
 from frbe_tools.db.store import connect
-from frbe_tools.web.app import create_app
+from frbe_tools.web.app import _opt_int, create_app
+
+
+def test_opt_int_blank_and_clamping() -> None:
+    assert _opt_int(None) is None
+    assert _opt_int("") is None
+    assert _opt_int("  ") is None
+    assert _opt_int("garbage") is None
+    assert _opt_int("42") == 42
+    # out-of-range clamps to the nearest bound (not a silent fall-back to default)
+    assert _opt_int("2000", lo=1, hi=1000) == 1000
+    assert _opt_int("0", lo=1, hi=1000) == 1
+
 
 COLS = (
     "period, idplayer, name, sex, birthday, affiliated, free_license, foreign_, region, idclub, elo"
