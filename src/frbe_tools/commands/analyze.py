@@ -12,6 +12,7 @@ from frbe_tools.analysis.rankings import (
     STATUS_PRESETS,
     club_history,
     latest_period,
+    player_distribution,
     player_rating_evolution,
     rank_clubs,
     rank_clubs_by_growth,
@@ -170,6 +171,45 @@ def club_history_cmd(
         con, "SELECT coalesce(name_short, name_long) FROM clubs WHERE idclub = ?", [idclub]
     )
     typer.echo(f"History for club {idclub}{f' ({name})' if name else ''}:")
+    _show(df)
+
+
+@app.command()
+def distribution(
+    dimension: Annotated[str, typer.Argument(help="rating or age.")] = "rating",
+    period: PeriodOpt = None,
+    club: Annotated[int | None, typer.Option("--club", "-c", help="Restrict to one club.")] = None,
+    region: Annotated[
+        str | None, typer.Option("--region", help="V, F or D (regional federation).")
+    ] = None,
+    status: StatusOpt = "member",
+    bin_size: Annotated[
+        int | None, typer.Option("--bin", help="Bucket width (default 100 Elo / 10 years).")
+    ] = None,
+) -> None:
+    """Show the distribution of players by rating or age (club/federation/global)."""
+    settings = load_settings()
+    con = connect(settings.db_path)
+    per = _resolve_period(con, period)
+    try:
+        df = player_distribution(
+            con,
+            per,
+            dimension=dimension,
+            statuses=_statuses(status),
+            idclub=club,
+            region=region,
+            bin_size=bin_size,
+        )
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if club is not None:
+        scope = f"club {club}"
+    elif region is not None:
+        scope = f"federation {region}"
+    else:
+        scope = "all clubs"
+    typer.echo(f"{dimension.capitalize()} distribution of {status} players in {scope} as of {per}:")
     _show(df)
 
 

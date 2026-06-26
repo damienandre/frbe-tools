@@ -88,6 +88,38 @@ def test_movers_club_filter(tmp_path: Path) -> None:
     assert "Club20 Member" not in r.text  # club 20 excluded
 
 
+def test_distribution_page(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    r = client.get("/distribution", params={"period": "202601"})
+    assert r.status_code == 200
+    assert "distChart" in r.text  # bar chart canvas
+    assert "2200-2299" in r.text  # rating band for Old Strong (elo 2200)
+
+
+def test_distribution_blank_form_fields_dont_422(tmp_path: Path) -> None:
+    # The plain-GET form submits blank club/bin as empty strings; that must not
+    # 422 (clicking "Apply" with the default empty fields is the happy path).
+    r = _client(tmp_path).get(
+        "/distribution",
+        params={"period": "202601", "club": "", "bin": "", "region": "any"},
+    )
+    assert r.status_code == 200
+    assert "2200-2299" in r.text  # club/bin blank -> global, default 100 bin
+
+
+def test_distribution_age_and_scope(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    ra = client.get("/distribution", params={"dimension": "age", "period": "202601"})
+    assert ra.status_code == 200
+    assert "distChart" in ra.text
+    rc = client.get("/distribution", params={"club": 10, "period": "202601"})
+    assert rc.status_code == 200
+    assert "2200-2299" in rc.text  # club 10's Old Strong
+    assert "2000-2099" not in rc.text  # club 20's member excluded
+    rf = client.get("/distribution", params={"region": "F", "period": "202601"})
+    assert rf.status_code == 200
+
+
 def test_club_and_player_detail(tmp_path: Path) -> None:
     client = _client(tmp_path)
     rc = client.get("/clubs/10")

@@ -7,6 +7,7 @@ import datetime as dt
 from frbe_tools.analysis.rankings import (
     club_history,
     latest_period,
+    player_distribution,
     player_rating_evolution,
     rank_clubs,
     rank_clubs_by_growth,
@@ -133,6 +134,60 @@ class TestPlayerRankings:
         # club 10 only has player 1 rated in both periods; player 4 (club 20) excluded
         df = rank_rating_changes(_con(), "2026-01-01", "2025-01-01", idclub=10)
         assert df["idplayer"].to_list() == [1]
+
+
+class TestDistribution:
+    def test_rating_buckets_global(self) -> None:
+        # 2026 members: elo 2200/1600/1900/2000 -> four bands of 1 each.
+        df = player_distribution(_con(), "2026-01-01", dimension="rating")
+        counts = dict(zip(df["bucket"], df["players"], strict=True))
+        assert counts == {"1600-1699": 1, "1900-1999": 1, "2000-2099": 1, "2200-2299": 1}
+        assert df["pct"].to_list() == [25.0, 25.0, 25.0, 25.0]
+
+    def test_rating_custom_bin(self) -> None:
+        df = player_distribution(_con(), "2026-01-01", dimension="rating", bin_size=500)
+        counts = dict(zip(df["bucket"], df["players"], strict=True))
+        assert counts == {"1500-1999": 2, "2000-2499": 2}  # 1600/1900 vs 2000/2200
+
+    def test_unrated_bucket(self) -> None:
+        con = _con()
+        con.execute(
+            f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ["2026-01-01", 9, "No Rating", "M", "1992-01-01", True, False, False, "V", 10, 0],
+        )
+        df = player_distribution(con, "2026-01-01", dimension="rating")
+        counts = dict(zip(df["bucket"], df["players"], strict=True))
+        assert counts["unrated"] == 1
+        assert df["bucket"].to_list()[-1] == "unrated"  # sorted last
+
+    def test_age_cohorts(self) -> None:
+        # 2026 cohorts: 1980->46, 2010->16, 1995->31, 1990->36.
+        df = player_distribution(_con(), "2026-01-01", dimension="age")
+        counts = dict(zip(df["bucket"], df["players"], strict=True))
+        assert counts == {"10-19": 1, "30-39": 2, "40-49": 1}
+
+    def test_club_scope(self) -> None:
+        df = player_distribution(_con(), "2026-01-01", dimension="rating", idclub=10)
+        assert df["players"].sum() == 3  # club 10 has 3 members
+
+    def test_region_scope(self) -> None:
+        df = player_distribution(_con(), "2026-01-01", dimension="rating", region="F")
+        assert df["players"].sum() == 2  # players 3 and 4 are region F members
+
+    def test_invalid_bin_raises(self) -> None:
+        for bad in (0, -5):
+            try:
+                player_distribution(_con(), "2026-01-01", dimension="rating", bin_size=bad)
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for bin_size={bad}")
+
+    def test_invalid_dimension_raises(self) -> None:
+        try:
+            player_distribution(_con(), "2026-01-01", dimension="height")
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for an unknown dimension")
 
 
 class TestLatestPeriod:

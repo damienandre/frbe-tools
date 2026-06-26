@@ -281,6 +281,78 @@ def club_history(
     ).pl()
 
 
+def player_distribution(
+    con: duckdb.DuckDBPyConnection,
+    period: dt.date | str,
+    *,
+    dimension: str = "rating",
+    statuses: tuple[str, ...] = ("member",),
+    idclub: int | None = None,
+    region: str | None = None,
+    bin_size: int | None = None,
+    age_year: int | None = None,
+) -> pl.DataFrame:
+    """Bucket players into a histogram by rating or age at ``period``.
+
+    ``dimension`` is ``rating`` or ``age``. Scope is the whole federation by
+    default; pass ``idclub`` to restrict to one club, or ``region``
+    (``V``/``F``/``D``) to one regional federation. ``bin_size`` is the bucket
+    width (default 100 Elo / 10 years).
+
+    Rating buckets are Elo bands; unrated players (``elo = 0``) collapse into a
+    single ``unrated`` bucket (sorted last) so totals still cover everyone. Age
+    uses birth-year cohorts (``year - birth_year``); players with an unknown
+    birthday are skipped.
+
+    Returns columns: bucket (label, e.g. ``1600-1699`` / ``10-19`` / ``unrated``),
+    players, pct (share of the total, rounded to 0.1%). Ordered low band first.
+    """
+    if dimension not in ("rating", "age"):
+        raise ValueError(f"Unknown dimension {dimension!r}; expected 'rating' or 'age'.")
+
+    status_sql, status_params = _status_clause(statuses)
+    where = ["ps.period = ?", status_sql]
+    params: list[Any] = [period, *status_params]
+    if idclub is not None:
+        where.append("ps.idclub = ?")
+        params.append(idclub)
+    if region is not None:
+        where.append("ps.region = ?")
+        params.append(region)
+
+    if dimension == "rating":
+        width = int(bin_size) if bin_size is not None else 100
+        # elo <= 0 -> NULL low, i.e. the "unrated" bucket; keep them in the count.
+        low_sql = "CASE WHEN ps.elo > 0 THEN CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER) END"
+    else:
+        width = int(bin_size) if bin_size is not None else 10
+        where.append("ps.birthday IS NOT NULL")
+        year = age_year if age_year is not None else _period_year(period)
+        low_sql = (
+            f"CAST(floor(({year} - extract('year' FROM ps.birthday))::DOUBLE / {{w}}) "
+            f"* {{w}} AS INTEGER)"
+        )
+    if width <= 0:
+        raise ValueError("bin_size must be a positive integer.")
+
+    sql = f"""
+        SELECT {low_sql.format(w=width)} AS low, count(*) AS players
+        FROM player_snapshots ps
+        WHERE {" AND ".join(where)}
+        GROUP BY low
+        ORDER BY low NULLS LAST
+    """
+    df = con.execute(sql, params).pl()
+    total = int(df["players"].sum()) if df.height else 0
+    return df.select(
+        bucket=pl.when(pl.col("low").is_null())
+        .then(pl.lit("unrated"))
+        .otherwise(pl.format("{}-{}", pl.col("low"), pl.col("low") + (width - 1))),
+        players="players",
+        pct=(100.0 * pl.col("players") / total).round(1) if total else pl.lit(0.0),
+    )
+
+
 def rank_rating_changes(
     con: duckdb.DuckDBPyConnection,
     period: dt.date | str,
