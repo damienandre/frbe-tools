@@ -1,5 +1,9 @@
 {% if rows %}
-<table>
+<div class="table-block">
+  <div class="table-actions">
+    <button type="button" class="btn" onclick="copyTableCsv(this)">Copy data</button>
+  </div>
+  <table>
   <thead>
     <tr>
       {% for c in columns %}
@@ -32,8 +36,9 @@
     </tr>
     {% endfor %}
   </tbody>
-</table>
-<p class="muted">{{ rows|length }} row(s){% if period is defined %} · as of {{ period }}{% endif %}</p>
+  </table>
+  <p class="muted">{{ rows|length }} row(s){% if period is defined %} · as of {{ period }}{% endif %}</p>
+</div>
 {% else %}
 <p class="muted">No results for these filters.</p>
 {% endif %}
