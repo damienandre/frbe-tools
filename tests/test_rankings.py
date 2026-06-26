@@ -178,6 +178,26 @@ class TestDistribution:
         counts = dict(zip(df["bucket"], df["players"], strict=True))
         assert counts == {"10-19": 1, "30-39": 2, "40-49": 1}
 
+    def test_tenure_distribution(self) -> None:
+        con = connect(":memory:")
+        ins = f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+        rows = [
+            # veteran: in club 10 since 2018 (with a gap) -> ~8 years tenure in 2026
+            ("2018-01-01", 1, "Vet", "M", "1980-01-01", True, False, False, "V", 10, 2000),
+            ("2026-01-01", 1, "Vet", "M", "1980-01-01", True, False, False, "V", 10, 2000),
+            # newcomer: first appears 2026 -> 0 years
+            ("2026-01-01", 2, "New", "M", "2000-01-01", True, False, False, "V", 10, 1500),
+            # switcher: club 20 in 2018, club 10 now -> tenure counts the current club only
+            ("2018-01-01", 3, "Switch", "M", "1980-01-01", True, False, False, "V", 20, 1800),
+            ("2026-01-01", 3, "Switch", "M", "1980-01-01", True, False, False, "V", 10, 1800),
+        ]
+        for r in rows:
+            con.execute(ins, list(r))
+        df = player_distribution(con, "2026-01-01", dimension="tenure")
+        counts = dict(zip(df["bucket"], df["players"], strict=True))
+        assert counts == {"0-1": 2, "8-9": 1}  # newcomer + switcher young; veteran old
+        assert df["bucket"].to_list()[0] == "0-1"  # ascending
+
     def test_club_scope(self) -> None:
         df = player_distribution(_con(), "2026-01-01", dimension="rating", idclub=10)
         assert df["players"].sum() == 3  # club 10 has 3 members

@@ -281,6 +281,55 @@ def club_history(
     ).pl()
 
 
+def _tenure_sql(
+    period: dt.date | str,
+    status_sql: str,
+    status_params: list[Any],
+    idclub: int | None,
+    region: str | None,
+    width: int,
+) -> tuple[str, list[Any]]:
+    """Build the club-tenure histogram query (helper for ``player_distribution``).
+
+    ``at_period`` is each in-scope player and the club they belong to at
+    ``period``; ``joined`` finds the earliest snapshot they share that club
+    (lapses ignored), and the outer query buckets the elapsed years into
+    ``width``-wide bands.
+    """
+    scope = ["ps.period = ?", status_sql, "ps.idclub IS NOT NULL"]
+    params: list[Any] = [period, *status_params]
+    if idclub is not None:
+        scope.append("ps.idclub = ?")
+        params.append(idclub)
+    if region is not None:
+        scope.append("ps.region = ?")
+        params.append(region)
+    params += [period, period]  # joined.h.period <= ? ; date_diff end date
+    # SECURITY: width is interpolated, not bound — safe only because it is an int
+    # (int(bin_size) in the caller). Keep it an int if refactoring.
+    sql = f"""
+        WITH at_period AS (
+            SELECT idplayer, idclub
+            FROM player_snapshots ps
+            WHERE {" AND ".join(scope)}
+        ),
+        joined AS (
+            SELECT a.idplayer, min(h.period) AS joined_period
+            FROM at_period a
+            JOIN player_snapshots h
+              ON h.idplayer = a.idplayer AND h.idclub = a.idclub AND h.period <= ?
+            GROUP BY a.idplayer
+        )
+        SELECT CAST(floor(date_diff('day', joined_period, CAST(? AS DATE))::DOUBLE
+                          / 365.0 / {width}) * {width} AS INTEGER) AS low,
+               count(*) AS players
+        FROM joined
+        GROUP BY low
+        ORDER BY low NULLS FIRST
+    """
+    return sql, params
+
+
 def player_distribution(
     con: duckdb.DuckDBPyConnection,
     period: dt.date | str,
@@ -293,12 +342,12 @@ def player_distribution(
     age_year: int | None = None,
     include_unrated: bool = True,
 ) -> pl.DataFrame:
-    """Bucket players into a histogram by rating or age at ``period``.
+    """Bucket players into a histogram by rating, age, or club tenure at ``period``.
 
-    ``dimension`` is ``rating`` or ``age``. Scope is the whole federation by
-    default; pass ``idclub`` to restrict to one club, or ``region``
+    ``dimension`` is ``rating``, ``age``, or ``tenure``. Scope is the whole
+    federation by default; pass ``idclub`` to restrict to one club, or ``region``
     (``V``/``F``/``D``) to one regional federation. ``bin_size`` is the bucket
-    width (default 100 Elo / 10 years).
+    width (default 100 Elo / 10 years / 2 tenure-years).
 
     Rating buckets are Elo bands; unrated players (``elo = 0``) collapse into a
     single ``unrated`` bucket sorted *first* (so it doesn't visually crowd the
@@ -308,58 +357,73 @@ def player_distribution(
     uses birth-year cohorts (``year - birth_year``); players with an unknown
     birthday are skipped.
 
+    Tenure is the elapsed years since a player first joined their *current* club
+    — the earliest snapshot (at or before ``period``) in which they appear with
+    the club they belong to at ``period``. Lapses are *not* subtracted: a member
+    who left and rejoined the same club counts from the original join, while a
+    club switch resets tenure to the new club's first snapshot. Only players in a
+    club at ``period`` are counted. Tenure is left-censored by the earliest
+    loaded snapshot, so the top band lumps together everyone present since the
+    data begins.
+
     Unlike ``rank_clubs`` & co this intentionally does *not* require
     ``idclub IS NOT NULL`` — the histogram counts everyone in scope, so for
     ``statuses`` that include club-less players (``all``/``unaffiliated``) the
     global/region total won't equal the sum of the per-club distributions.
 
-    Returns columns: bucket (label, e.g. ``1600-1699`` / ``10-19`` / ``unrated``),
-    players, pct (share of the total, rounded to 0.1%). Ordered low band first.
+    Returns columns: bucket (label, e.g. ``1600-1699`` / ``10-19`` / ``0-1`` /
+    ``unrated``), players, pct (share of the total, rounded to 0.1%). Ordered low
+    band first.
     """
-    if dimension not in ("rating", "age"):
-        raise ValueError(f"Unknown dimension {dimension!r}; expected 'rating' or 'age'.")
+    if dimension not in ("rating", "age", "tenure"):
+        raise ValueError(f"Unknown dimension {dimension!r}; expected 'rating', 'age', or 'tenure'.")
 
     status_sql, status_params = _status_clause(statuses)
-    where = ["ps.period = ?", status_sql]
-    params: list[Any] = [period, *status_params]
-    if idclub is not None:
-        where.append("ps.idclub = ?")
-        params.append(idclub)
-    if region is not None:
-        where.append("ps.region = ?")
-        params.append(region)
-
-    if dimension == "rating":
-        width = int(bin_size) if bin_size is not None else 100
-        if include_unrated:
-            # elo <= 0 -> NULL low, i.e. the "unrated" bucket; keep them counted.
-            low_sql = (
-                "CASE WHEN ps.elo > 0 THEN CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER) END"
-            )
-        else:
-            where.append("ps.elo > 0")
-            low_sql = "CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER)"
-    else:
-        width = int(bin_size) if bin_size is not None else 10
-        where.append("ps.birthday IS NOT NULL")
-        year = age_year if age_year is not None else _period_year(period)
-        low_sql = (
-            f"CAST(floor(({year} - extract('year' FROM ps.birthday))::DOUBLE / {{w}}) "
-            f"* {{w}} AS INTEGER)"
-        )
+    _defaults = {"rating": 100, "age": 10, "tenure": 2}
+    width = int(bin_size) if bin_size is not None else _defaults[dimension]
     if width <= 0:
         raise ValueError("bin_size must be a positive integer.")
 
-    # SECURITY: width and year are interpolated into the SQL string, not bound as
-    # parameters. This is injection-safe only because both are guaranteed ints
-    # (int(bin_size) above; _period_year -> int). Keep them ints if refactoring.
-    sql = f"""
-        SELECT {low_sql.format(w=width)} AS low, count(*) AS players
-        FROM player_snapshots ps
-        WHERE {" AND ".join(where)}
-        GROUP BY low
-        ORDER BY low NULLS FIRST
-    """
+    if dimension == "tenure":
+        sql, params = _tenure_sql(period, status_sql, status_params, idclub, region, width)
+    else:
+        where = ["ps.period = ?", status_sql]
+        params = [period, *status_params]
+        if idclub is not None:
+            where.append("ps.idclub = ?")
+            params.append(idclub)
+        if region is not None:
+            where.append("ps.region = ?")
+            params.append(region)
+
+        if dimension == "rating":
+            if include_unrated:
+                # elo <= 0 -> NULL low, i.e. the "unrated" bucket; keep them counted.
+                low_sql = (
+                    "CASE WHEN ps.elo > 0 "
+                    "THEN CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER) END"
+                )
+            else:
+                where.append("ps.elo > 0")
+                low_sql = "CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER)"
+        else:
+            where.append("ps.birthday IS NOT NULL")
+            year = age_year if age_year is not None else _period_year(period)
+            low_sql = (
+                f"CAST(floor(({year} - extract('year' FROM ps.birthday))::DOUBLE / {{w}}) "
+                f"* {{w}} AS INTEGER)"
+            )
+        # SECURITY: width and year are interpolated into the SQL string, not bound
+        # as parameters. This is injection-safe only because both are guaranteed
+        # ints (int(bin_size) above; _period_year -> int). Keep them ints.
+        sql = f"""
+            SELECT {low_sql.format(w=width)} AS low, count(*) AS players
+            FROM player_snapshots ps
+            WHERE {" AND ".join(where)}
+            GROUP BY low
+            ORDER BY low NULLS FIRST
+        """
+
     df = con.execute(sql, params).pl()
     total = int(df["players"].sum()) if df.height else 0
     return df.select(
