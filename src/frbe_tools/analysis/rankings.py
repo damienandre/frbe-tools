@@ -291,6 +291,7 @@ def player_distribution(
     region: str | None = None,
     bin_size: int | None = None,
     age_year: int | None = None,
+    include_unrated: bool = True,
 ) -> pl.DataFrame:
     """Bucket players into a histogram by rating or age at ``period``.
 
@@ -300,7 +301,10 @@ def player_distribution(
     width (default 100 Elo / 10 years).
 
     Rating buckets are Elo bands; unrated players (``elo = 0``) collapse into a
-    single ``unrated`` bucket (sorted last) so totals still cover everyone. Age
+    single ``unrated`` bucket sorted *first* (so it doesn't visually crowd the
+    low rating bands) and still count toward the total. Pass
+    ``include_unrated=False`` to drop them entirely, so ``pct`` reflects the
+    distribution of *rated* players only (only meaningful for ``rating``). Age
     uses birth-year cohorts (``year - birth_year``); players with an unknown
     birthday are skipped.
 
@@ -327,8 +331,14 @@ def player_distribution(
 
     if dimension == "rating":
         width = int(bin_size) if bin_size is not None else 100
-        # elo <= 0 -> NULL low, i.e. the "unrated" bucket; keep them in the count.
-        low_sql = "CASE WHEN ps.elo > 0 THEN CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER) END"
+        if include_unrated:
+            # elo <= 0 -> NULL low, i.e. the "unrated" bucket; keep them counted.
+            low_sql = (
+                "CASE WHEN ps.elo > 0 THEN CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER) END"
+            )
+        else:
+            where.append("ps.elo > 0")
+            low_sql = "CAST(floor(ps.elo::DOUBLE / {w}) * {w} AS INTEGER)"
     else:
         width = int(bin_size) if bin_size is not None else 10
         where.append("ps.birthday IS NOT NULL")
@@ -348,7 +358,7 @@ def player_distribution(
         FROM player_snapshots ps
         WHERE {" AND ".join(where)}
         GROUP BY low
-        ORDER BY low NULLS LAST
+        ORDER BY low NULLS FIRST
     """
     df = con.execute(sql, params).pl()
     total = int(df["players"].sum()) if df.height else 0

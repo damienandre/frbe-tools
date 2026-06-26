@@ -158,7 +158,19 @@ class TestDistribution:
         df = player_distribution(con, "2026-01-01", dimension="rating")
         counts = dict(zip(df["bucket"], df["players"], strict=True))
         assert counts["unrated"] == 1
-        assert df["bucket"].to_list()[-1] == "unrated"  # sorted last
+        assert df["bucket"].to_list()[0] == "unrated"  # sorted first, before the bands
+
+    def test_hide_unrated(self) -> None:
+        con = _con()
+        con.execute(
+            f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ["2026-01-01", 9, "No Rating", "M", "1992-01-01", True, False, False, "V", 10, 0],
+        )
+        df = player_distribution(con, "2026-01-01", dimension="rating", include_unrated=False)
+        buckets = df["bucket"].to_list()
+        assert "unrated" not in buckets
+        # pct now covers the 4 rated members only (25% each), not 5 incl. unrated.
+        assert df["pct"].to_list() == [25.0, 25.0, 25.0, 25.0]
 
     def test_age_cohorts(self) -> None:
         # 2026 cohorts: 1980->46, 2010->16, 1995->31, 1990->36.

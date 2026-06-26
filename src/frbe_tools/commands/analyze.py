@@ -186,6 +186,9 @@ def distribution(
     bin_size: Annotated[
         int | None, typer.Option("--bin", help="Bucket width (default 100 Elo / 10 years).")
     ] = None,
+    hide_unrated: Annotated[
+        bool, typer.Option("--hide-unrated", help="Drop unrated players (rating only).")
+    ] = False,
 ) -> None:
     """Show the distribution of players by rating or age (club/federation/global)."""
     settings = load_settings()
@@ -200,6 +203,7 @@ def distribution(
             idclub=club,
             region=region,
             bin_size=bin_size,
+            include_unrated=not hide_unrated,
         )
     except ValueError as exc:
         raise typer.BadParameter(str(exc)) from exc

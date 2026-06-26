@@ -408,6 +408,7 @@ def _register_routes(app: FastAPI) -> None:
         region: Annotated[str, Query()] = "any",
         status: StatusQ = "member",
         bin_size: Annotated[str | None, Query(alias="bin")] = None,
+        hide_unrated: Annotated[bool, Query()] = False,
     ) -> dict[str, Any]:
         # club/bin arrive as strings so a blank form field (``""``) degrades to
         # "no filter" instead of 422-ing the page (see _opt_int).
@@ -418,6 +419,7 @@ def _register_routes(app: FastAPI) -> None:
             "region": region,
             "status": status,
             "bin_size": _opt_int(bin_size, lo=1, hi=1000),
+            "hide_unrated": hide_unrated,
         }
 
     @app.get("/distribution", response_class=HTMLResponse)
@@ -435,6 +437,7 @@ def _register_routes(app: FastAPI) -> None:
             idclub=p["club"],
             region=_none(p["region"]),
             bin_size=p["bin_size"],
+            include_unrated=not p["hide_unrated"],
         )
         cols, rows = df_to_table(df)
         chart = {"labels": [r["bucket"] for r in rows], "players": [r["players"] for r in rows]}

@@ -130,6 +130,11 @@ def test_distribution_age_and_scope(tmp_path: Path) -> None:
     assert "2000-2099" not in rc.text  # club 20's member excluded
     rf = client.get("/distribution", params={"region": "F", "period": "202601"})
     assert rf.status_code == 200
+    # hide_unrated checkbox is offered for the rating dimension, hidden for age.
+    assert "hide unrated" in client.get("/distribution", params={"period": "202601"}).text
+    assert "hide unrated" not in ra.text
+    rh = client.get("/distribution", params={"period": "202601", "hide_unrated": "true"})
+    assert rh.status_code == 200
 
 
 def test_club_and_player_detail(tmp_path: Path) -> None:
