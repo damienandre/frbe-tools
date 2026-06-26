@@ -6,7 +6,14 @@ function copyTableCsv(btn) {
   if (!table) return;
 
   const esc = (text) => {
-    const s = (text || "").trim();
+    let s = (text || "").trim();
+    // Neutralize spreadsheet formula injection (CWE-1236): a cell starting with
+    // = + - @ is run as a formula by Excel/Sheets. Prefix a literal-forcing
+    // apostrophe, but leave plain numbers (e.g. the negative deltas in
+    // movers/growth) untouched so the data stays usable.
+    if (/^[=+\-@]/.test(s) && !/^[+-]?\d+(\.\d+)?$/.test(s)) {
+      s = "'" + s;
+    }
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
   const csv = [...table.querySelectorAll("tr")]
