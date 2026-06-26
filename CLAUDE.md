@@ -68,8 +68,9 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   (Elo aggregates incl. top-N boards), `rank_clubs_by_growth` (between two
   periods), `club_history` (one club's metrics across all periods),
   `player_rating_evolution`, `rank_rating_changes`, `player_distribution`
-  (histogram of players by rating or age, scoped to a club / region-federation /
-  global, with unrated as its own bucket). Ages use
+  (histogram of players by rating, age or club tenure, scoped to a club /
+  region-federation / global; rating keeps unrated as its own bucket, tenure is
+  years since first joining the current club). Ages use
   **birth-year cohorts** (`year - birth_year`). Status presets in
   `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
 - **`web/`** — local dashboard (FastAPI + Jinja2 + HTMX), a thin presentation

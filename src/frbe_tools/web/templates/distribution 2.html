@@ -20,7 +20,7 @@
       {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
     </select>
   </label>
-  <label>Bin <input type="number" name="bin" min="1" max="1000" value="{{ form.bin_size if form.bin_size is not none else '' }}" placeholder="{{ {'rating': 100, 'age': 10, 'tenure': 2}[dimension] }}"></label>
+  <label>Bin <input type="number" name="bin" min="1" max="1000" value="{{ form.bin_size if form.bin_size is not none else '' }}" placeholder="{{ 100 if dimension == 'rating' else 10 }}"></label>
   {% if dimension == 'rating' %}
   <label class="check"><input type="checkbox" name="hide_unrated" value="true" {{ 'checked' if form.hide_unrated }}> hide unrated</label>
   {% endif %}

@@ -135,6 +135,11 @@ def test_distribution_age_and_scope(tmp_path: Path) -> None:
     assert "hide unrated" not in ra.text
     rh = client.get("/distribution", params={"period": "202601", "hide_unrated": "true"})
     assert rh.status_code == 200
+    # tenure dimension: club 10 members joined in 2025 (1y) or 2026 (0y) -> "0-1".
+    rt = client.get("/distribution", params={"dimension": "tenure", "period": "202601"})
+    assert rt.status_code == 200
+    assert "distChart" in rt.text
+    assert "0-1" in rt.text
 
 
 def test_club_and_player_detail(tmp_path: Path) -> None:

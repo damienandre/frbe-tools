@@ -180,7 +180,7 @@ _NAV = [
     ("/distribution", "Distribution"),
 ]
 
-DISTRIBUTION_DIMENSIONS = ("rating", "age")
+DISTRIBUTION_DIMENSIONS = ("rating", "age", "tenure")
 
 
 def _base(request: Request, **ctx: Any) -> dict[str, Any]:

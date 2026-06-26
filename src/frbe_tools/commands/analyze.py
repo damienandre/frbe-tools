@@ -176,7 +176,7 @@ def club_history_cmd(
 
 @app.command()
 def distribution(
-    dimension: Annotated[str, typer.Argument(help="rating or age.")] = "rating",
+    dimension: Annotated[str, typer.Argument(help="rating, age or tenure.")] = "rating",
     period: PeriodOpt = None,
     club: Annotated[int | None, typer.Option("--club", "-c", help="Restrict to one club.")] = None,
     region: Annotated[
@@ -184,7 +184,8 @@ def distribution(
     ] = None,
     status: StatusOpt = "member",
     bin_size: Annotated[
-        int | None, typer.Option("--bin", help="Bucket width (default 100 Elo / 10 years).")
+        int | None,
+        typer.Option("--bin", help="Bucket width (default 100 Elo / 10 years / 2 tenure-years)."),
     ] = None,
     hide_unrated: Annotated[
         bool, typer.Option("--hide-unrated", help="Drop unrated players (rating only).")
