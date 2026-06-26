@@ -75,6 +75,20 @@ def test_clubs_page_and_table(tmp_path: Path) -> None:
     assert "row(s)" in r.text
 
 
+def test_table_has_copy_csv_button(tmp_path: Path) -> None:
+    # The "Copy data" button + its handler must be present on both the full page
+    # and the HTMX table fragment, and app.js (the handler) must be served.
+    client = _client(tmp_path)
+    page = client.get("/clubs")
+    assert 'src="/static/app.js"' in page.text
+    frag = client.get("/clubs/table", params={"status": "member"})
+    assert "copyTableCsv(this)" in frag.text
+    assert "Copy data" in frag.text
+    js = client.get("/static/app.js")
+    assert js.status_code == 200
+    assert "function copyTableCsv" in js.text
+
+
 def test_clubs_table_youth_filter(tmp_path: Path) -> None:
     r = _client(tmp_path).get("/clubs/table", params={"max_age": 19, "period": "202601"})
     assert r.status_code == 200
