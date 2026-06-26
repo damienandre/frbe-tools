@@ -8,7 +8,16 @@ from fastapi.testclient import TestClient
 
 from frbe_tools.config import Settings
 from frbe_tools.db.store import connect
-from frbe_tools.web.app import _opt_int, create_app
+from frbe_tools.web.app import _density_curve, _opt_int, create_app
+
+
+def test_density_curve() -> None:
+    assert _density_curve([]) == []
+    assert _density_curve([0, 0]) == [0.0, 0.0]
+    out = _density_curve([0, 10, 0])
+    assert abs(sum(out) - 10) < 0.05  # rescaled to preserve the total
+    assert out[0] == out[2]  # symmetric input -> symmetric curve
+    assert out[1] > out[0] > 0  # the spike spreads onto its neighbours
 
 
 def test_opt_int_blank_and_clamping() -> None:
@@ -106,6 +115,7 @@ def test_distribution_page(tmp_path: Path) -> None:
     assert r.status_code == 200
     assert "distChart" in r.text  # bar chart canvas
     assert "2200-2299" in r.text  # rating band for Old Strong (elo 2200)
+    assert '"density"' in r.text  # density curve overlaid on the histogram
 
 
 def test_distribution_blank_form_fields_dont_422(tmp_path: Path) -> None:
