@@ -69,6 +69,7 @@ a.card.link p { margin: 0; color: var(--muted); font-size: .9rem; }
 table { width: 100%; border-collapse: collapse; background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); }
 th { background: #fafbfc; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+th.num { text-align: right; }
 td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tbody tr:last-child td { border-bottom: none; }
 tbody tr:hover { background: #f9fafb; }

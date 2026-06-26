@@ -1,7 +1,22 @@
 {% if rows %}
 <table>
   <thead>
-    <tr>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr>
+    <tr>
+      {% for c in columns %}
+        {# Right-align a header only when its cells are right-aligned numbers
+           (numeric and not a link column), so it lines up with the td.num cells. #}
+        {% set ns = namespace(num=false, done=false) %}
+        {% if not (links and c in links) %}
+          {% for row in rows %}
+            {% if not ns.done and row[c] is not none %}
+              {% set ns.num = row[c] is number %}
+              {% set ns.done = true %}
+            {% endif %}
+          {% endfor %}
+        {% endif %}
+        <th class="{{ 'num' if ns.num else '' }}">{{ c }}</th>
+      {% endfor %}
+    </tr>
   </thead>
   <tbody>
     {% for row in rows %}

@@ -116,6 +116,11 @@ def test_distribution_page(tmp_path: Path) -> None:
     assert "distChart" in r.text  # bar chart canvas
     assert "2200-2299" in r.text  # rating band for Old Strong (elo 2200)
     assert '"density"' in r.text  # density curve overlaid on the histogram
+    # Numeric headers are right-aligned (class="num") to line up with their cells;
+    # the text column header is not.
+    assert '<th class="num">players</th>' in r.text
+    assert '<th class="num">pct</th>' in r.text
+    assert '<th class="">bucket</th>' in r.text
 
 
 def test_distribution_blank_form_fields_dont_422(tmp_path: Path) -> None:
