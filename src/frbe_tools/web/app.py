@@ -26,6 +26,7 @@ from frbe_tools.analysis.rankings import (
     STATUS_PRESETS,
     club_history,
     latest_period,
+    player_distribution,
     player_rating_evolution,
     rank_clubs,
     rank_clubs_by_growth,
@@ -83,6 +84,29 @@ def _tri(value: str | None) -> bool | None:
 def _none(value: str | None) -> str | None:
     """Treat empty/``any`` selects as 'no filter'."""
     return None if value in ("", "any", None) else value
+
+
+def _opt_int(raw: str | None, *, lo: int | None = None, hi: int | None = None) -> int | None:
+    """Coerce an optional numeric query field to int; blank/non-numeric -> None.
+
+    Plain-GET forms submit empty number inputs as ``""``, which 422 an ``int |
+    None`` query param. Distribution parses these defensively (like
+    ``parse_period`` does for the period field) so a blank field means "no
+    filter" / "use the default" rather than an error. An in-range value is
+    returned as-is; an out-of-range one is *clamped* to ``lo``/``hi`` (so e.g.
+    ``bin=2000`` becomes the max bin, not a silent fall-back to the default).
+    """
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        n = int(raw)
+    except ValueError:
+        return None
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
 
 
 def get_db(request: Request) -> Iterator[duckdb.DuckDBPyConnection]:
@@ -153,7 +177,10 @@ _NAV = [
     ("/strength", "Strength"),
     ("/growth", "Growth"),
     ("/movers", "Movers"),
+    ("/distribution", "Distribution"),
 ]
+
+DISTRIBUTION_DIMENSIONS = ("rating", "age")
 
 
 def _base(request: Request, **ctx: Any) -> dict[str, Any]:
@@ -372,6 +399,63 @@ def _register_routes(app: FastAPI) -> None:
     @app.get("/movers/table", response_class=HTMLResponse)
     def movers_table(request: Request, db: DbDep, p: dict = Depends(_movers_params)):
         return TEMPLATES.TemplateResponse(request, "_table.html", _base(request, **_movers(db, p)))
+
+    # ---- Distribution (histogram by rating or age) ----------------------- #
+    def _distribution_params(
+        dimension: Annotated[str, Query()] = "rating",
+        period: PeriodQ = None,
+        club: Annotated[str | None, Query()] = None,
+        region: Annotated[str, Query()] = "any",
+        status: StatusQ = "member",
+        bin_size: Annotated[str | None, Query(alias="bin")] = None,
+        hide_unrated: Annotated[bool, Query()] = False,
+    ) -> dict[str, Any]:
+        # club/bin arrive as strings so a blank form field (``""``) degrades to
+        # "no filter" instead of 422-ing the page (see _opt_int).
+        return {
+            "dimension": dimension,
+            "period": period,
+            "club": _opt_int(club),
+            "region": region,
+            "status": status,
+            "bin_size": _opt_int(bin_size, lo=1, hi=1000),
+            "hide_unrated": hide_unrated,
+        }
+
+    @app.get("/distribution", response_class=HTMLResponse)
+    def distribution_page(request: Request, db: DbDep, p: dict = Depends(_distribution_params)):
+        per = parse_period(db, p["period"])
+        # Web layer degrades gracefully on bad input (like parse_period / the
+        # _strength metric fallback): an unknown dimension renders the default
+        # rather than 400-ing, whereas the CLI / player_distribution raise.
+        dimension = p["dimension"] if p["dimension"] in DISTRIBUTION_DIMENSIONS else "rating"
+        df = player_distribution(
+            db,
+            per,
+            dimension=dimension,
+            statuses=statuses_for(p["status"]),
+            idclub=p["club"],
+            region=_none(p["region"]),
+            bin_size=p["bin_size"],
+            include_unrated=not p["hide_unrated"],
+        )
+        cols, rows = df_to_table(df)
+        chart = {"labels": [r["bucket"] for r in rows], "players": [r["players"] for r in rows]}
+        return TEMPLATES.TemplateResponse(
+            request,
+            "distribution.html",
+            _base(
+                request,
+                form=p,
+                period=per,
+                dimension=dimension,
+                presets=list(STATUS_PRESETS),
+                dimensions=DISTRIBUTION_DIMENSIONS,
+                columns=cols,
+                rows=rows,
+                chart=json.dumps(chart),
+            ),
+        )
 
     # ---- Club history (table + chart) ------------------------------------ #
     @app.get("/clubs/{idclub}", response_class=HTMLResponse)

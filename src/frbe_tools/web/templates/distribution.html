@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Distribution · frbe-tools{% endblock %}
+{% block content %}
+<h1>Player distribution</h1>
+<form class="filters" method="get" action="/distribution">
+  <label>By
+    <select name="dimension">
+      {% for d in dimensions %}<option value="{{ d }}" {{ 'selected' if dimension == d }}>{{ d }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Period <input type="text" name="period" value="{{ form.period or '' }}" placeholder="latest"></label>
+  <label>Club <input type="number" name="club" value="{{ form.club if form.club is not none else '' }}" placeholder="all"></label>
+  <label>Federation
+    <select name="region">
+      {% for r in ['any', 'V', 'F', 'D'] %}<option value="{{ r }}" {{ 'selected' if form.region == r }}>{{ r }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Status
+    <select name="status">
+      {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Bin <input type="number" name="bin" min="1" max="1000" value="{{ form.bin_size if form.bin_size is not none else '' }}" placeholder="{{ 100 if dimension == 'rating' else 10 }}"></label>
+  {% if dimension == 'rating' %}
+  <label class="check"><input type="checkbox" name="hide_unrated" value="true" {{ 'checked' if form.hide_unrated }}> hide unrated</label>
+  {% endif %}
+  <button type="submit">Apply</button>
+</form>
+{% if rows %}
+<div class="charts">
+  <div class="card"><canvas id="distChart"></canvas></div>
+</div>
+{% endif %}
+{% include "_table.html" %}
+{% endblock %}
+{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block scripts %}
+<script id="chart-data" type="application/json">{{ chart | safe }}</script>
+<script>
+  const d = JSON.parse(document.getElementById('chart-data').textContent);
+  if (d.labels.length) {
+    new Chart(document.getElementById('distChart'), {
+      type: 'bar',
+      data: { labels: d.labels, datasets: [{ label: 'players', data: d.players }] },
+      options: { responsive: true, plugins: { legend: { display: false } } }
+    });
+  }
+</script>
+{% endblock %}

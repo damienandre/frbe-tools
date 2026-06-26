@@ -8,7 +8,19 @@ from fastapi.testclient import TestClient
 
 from frbe_tools.config import Settings
 from frbe_tools.db.store import connect
-from frbe_tools.web.app import create_app
+from frbe_tools.web.app import _opt_int, create_app
+
+
+def test_opt_int_blank_and_clamping() -> None:
+    assert _opt_int(None) is None
+    assert _opt_int("") is None
+    assert _opt_int("  ") is None
+    assert _opt_int("garbage") is None
+    assert _opt_int("42") == 42
+    # out-of-range clamps to the nearest bound (not a silent fall-back to default)
+    assert _opt_int("2000", lo=1, hi=1000) == 1000
+    assert _opt_int("0", lo=1, hi=1000) == 1
+
 
 COLS = (
     "period, idplayer, name, sex, birthday, affiliated, free_license, foreign_, region, idclub, elo"
@@ -86,6 +98,43 @@ def test_movers_club_filter(tmp_path: Path) -> None:
     assert r.status_code == 200
     assert "Old Strong" in r.text
     assert "Club20 Member" not in r.text  # club 20 excluded
+
+
+def test_distribution_page(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    r = client.get("/distribution", params={"period": "202601"})
+    assert r.status_code == 200
+    assert "distChart" in r.text  # bar chart canvas
+    assert "2200-2299" in r.text  # rating band for Old Strong (elo 2200)
+
+
+def test_distribution_blank_form_fields_dont_422(tmp_path: Path) -> None:
+    # The plain-GET form submits blank club/bin as empty strings; that must not
+    # 422 (clicking "Apply" with the default empty fields is the happy path).
+    r = _client(tmp_path).get(
+        "/distribution",
+        params={"period": "202601", "club": "", "bin": "", "region": "any"},
+    )
+    assert r.status_code == 200
+    assert "2200-2299" in r.text  # club/bin blank -> global, default 100 bin
+
+
+def test_distribution_age_and_scope(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    ra = client.get("/distribution", params={"dimension": "age", "period": "202601"})
+    assert ra.status_code == 200
+    assert "distChart" in ra.text
+    rc = client.get("/distribution", params={"club": 10, "period": "202601"})
+    assert rc.status_code == 200
+    assert "2200-2299" in rc.text  # club 10's Old Strong
+    assert "2000-2099" not in rc.text  # club 20's member excluded
+    rf = client.get("/distribution", params={"region": "F", "period": "202601"})
+    assert rf.status_code == 200
+    # hide_unrated checkbox is offered for the rating dimension, hidden for age.
+    assert "hide unrated" in client.get("/distribution", params={"period": "202601"}).text
+    assert "hide unrated" not in ra.text
+    rh = client.get("/distribution", params={"period": "202601", "hide_unrated": "true"})
+    assert rh.status_code == 200
 
 
 def test_club_and_player_detail(tmp_path: Path) -> None:

@@ -21,6 +21,7 @@ uv run frbe scrape players             # download player dumps -> data/player/
 uv run frbe db build                   # ingest player dumps + clubs into DuckDB
 uv run frbe db info                    # summarize the database
 uv run frbe analyze clubs --max-age 19 # rank clubs (here: youth); also strength/growth/player/movers
+uv run frbe analyze distribution rating --region F  # histogram of players by rating (or age)
 uv run frbe web                        # local dashboard at http://127.0.0.1:8080
 uv run python -m frbe_tools --help     # module entry point
 uv run ruff check                      # lint
@@ -66,7 +67,9 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   function: status/age/sex/foreign/region/rated/new), `rank_clubs_by_strength`
   (Elo aggregates incl. top-N boards), `rank_clubs_by_growth` (between two
   periods), `club_history` (one club's metrics across all periods),
-  `player_rating_evolution`, `rank_rating_changes`. Ages use
+  `player_rating_evolution`, `rank_rating_changes`, `player_distribution`
+  (histogram of players by rating or age, scoped to a club / region-federation /
+  global, with unrated as its own bucket). Ages use
   **birth-year cohorts** (`year - birth_year`). Status presets in
   `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
 - **`web/`** — local dashboard (FastAPI + Jinja2 + HTMX), a thin presentation
