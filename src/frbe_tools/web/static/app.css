@@ -78,6 +78,18 @@ tbody tr:hover { background: #f9fafb; }
 td a { color: var(--accent); text-decoration: none; }
 td a:hover { text-decoration: underline; }
 
+/* Distribution drill-down: each bucket row expands an embedded player table. */
+.expander {
+  display: inline-flex; align-items: center; gap: .4rem;
+  background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer;
+}
+.expander::before { content: "\25B8"; font-size: .7em; color: var(--muted); }
+.expander[aria-expanded="true"]::before { content: "\25BE"; }
+.expander:hover { text-decoration: underline; }
+.bucket-detail > td { padding: 0 0 .8rem 1.5rem; background: #fafbfc; }
+.bucket-detail .table-block { margin-top: .4rem; }
+.bucket-detail table { font-size: .9rem; }
+
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1rem; }
 @media (max-width: 720px) { .charts { grid-template-columns: 1fr; } }
 pre { background: #f0f2f5; padding: .8rem; border-radius: 6px; overflow-x: auto; }

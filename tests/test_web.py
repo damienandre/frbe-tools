@@ -8,7 +8,16 @@ from fastapi.testclient import TestClient
 
 from frbe_tools.config import Settings
 from frbe_tools.db.store import connect
-from frbe_tools.web.app import _density_curve, _opt_int, create_app
+from frbe_tools.web.app import _bucket_low, _density_curve, _opt_int, create_app
+
+
+def test_bucket_low() -> None:
+    assert _bucket_low("1600-1699") == 1600
+    assert _bucket_low("0-1") == 0  # tenure band starting at zero
+    assert _bucket_low("unrated") is None
+    # A future-dated birthday yields a negative age cohort; the label has a
+    # leading minus and a second '-' before the high bound. Must not crash.
+    assert _bucket_low("-10--1") == -10
 
 
 def test_density_curve() -> None:
@@ -64,6 +73,7 @@ def test_index_shows_summary(tmp_path: Path) -> None:
     r = _client(tmp_path).get("/")
     assert r.status_code == 200
     assert "latest period" in r.text
+    assert 'href="/retention"' in r.text  # overview links to every area, incl. retention
 
 
 def test_clubs_page_and_table(tmp_path: Path) -> None:
@@ -130,11 +140,38 @@ def test_distribution_page(tmp_path: Path) -> None:
     assert "distChart" in r.text  # bar chart canvas
     assert "2200-2299" in r.text  # rating band for Old Strong (elo 2200)
     assert '"density"' in r.text  # density curve overlaid on the histogram
-    # Numeric headers are right-aligned (class="num") to line up with their cells;
-    # the text column header is not.
+    # Numeric headers are right-aligned (class="num"); the bucket header is not.
     assert '<th class="num">players</th>' in r.text
     assert '<th class="num">pct</th>' in r.text
-    assert '<th class="">bucket</th>' in r.text
+    assert "<th>bucket</th>" in r.text
+    # Each bucket is an expander that drills into its players via HTMX.
+    assert 'class="expander"' in r.text
+    assert "/distribution/players?" in r.text
+
+
+def test_retention_page(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    # No club given: a prompt, no 500.
+    empty = client.get("/retention")
+    assert empty.status_code == 200
+    assert "Enter a club id" in empty.text
+    # A real club renders its cohort table + curve canvas.
+    r = client.get("/retention", params={"club": 10})
+    assert r.status_code == 200
+    assert "Member retention" in r.text
+    assert "Alpha" in r.text  # club name from the dim
+    assert "retChart" in r.text
+    # Splitting by a demographic and an unknown split both stay 200.
+    assert client.get("/retention", params={"club": 10, "by": "age"}).status_code == 200
+    assert client.get("/retention", params={"club": 10, "by": "bogus"}).status_code == 200
+
+
+def test_retention_blank_and_unknown_club_dont_error(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    assert client.get("/retention", params={"club": "", "max": ""}).status_code == 200
+    none = client.get("/retention", params={"club": 999})
+    assert none.status_code == 200
+    assert "No measurable cohorts" in none.text
 
 
 def test_distribution_blank_form_fields_dont_422(tmp_path: Path) -> None:
@@ -169,6 +206,46 @@ def test_distribution_age_and_scope(tmp_path: Path) -> None:
     assert rt.status_code == 200
     assert "distChart" in rt.text
     assert "0-1" in rt.text
+
+
+def test_distribution_players_drilldown(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    # The 2200 band holds Old Strong; the fragment links to his detail page.
+    r = client.get(
+        "/distribution/players",
+        params={"dimension": "rating", "period": "202601", "low": 2200},
+    )
+    assert r.status_code == 200
+    assert "Old Strong" in r.text
+    assert 'href="/players/1"' in r.text
+    assert "Young Gun" not in r.text  # other bands excluded
+
+
+def test_distribution_players_drops_club_when_scoped(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    # Scoped to one club, the club column is redundant and omitted.
+    scoped = client.get(
+        "/distribution/players",
+        params={"dimension": "rating", "period": "202601", "low": 1900, "club": 10},
+    )
+    assert scoped.status_code == 200
+    assert "Foreign Fem" in scoped.text
+    assert "club</th>" not in scoped.text
+    # Federation-wide, the club column is present.
+    wide = client.get(
+        "/distribution/players",
+        params={"dimension": "rating", "period": "202601", "low": 1900},
+    )
+    assert "club</th>" in wide.text
+
+
+def test_distribution_players_non_rating_without_bound_is_empty(tmp_path: Path) -> None:
+    # age/tenure have no "unrated" bucket; a missing bound yields no players, no 500.
+    r = _client(tmp_path).get(
+        "/distribution/players", params={"dimension": "age", "period": "202601"}
+    )
+    assert r.status_code == 200
+    assert "No results" in r.text
 
 
 def test_club_and_player_detail(tmp_path: Path) -> None:

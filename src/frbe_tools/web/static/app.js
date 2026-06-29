@@ -16,7 +16,11 @@ function copyTableCsv(btn) {
     }
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
+  // Only this table's own rows: skip rows belonging to a nested table (the
+  // distribution drill-down embeds a player table inside a bucket row) and the
+  // empty detail rows that hold them.
   const csv = [...table.querySelectorAll("tr")]
+    .filter((tr) => tr.closest("table") === table && !tr.classList.contains("bucket-detail"))
     .map((tr) => [...tr.querySelectorAll("th,td")].map((c) => esc(c.textContent)).join(","))
     .join("\n");
 

@@ -6,9 +6,11 @@ import datetime as dt
 
 from frbe_tools.analysis.rankings import (
     club_history,
+    club_retention,
     latest_period,
     player_distribution,
     player_rating_evolution,
+    players_in_bucket,
     rank_clubs,
     rank_clubs_by_growth,
     rank_clubs_by_strength,
@@ -220,6 +222,184 @@ class TestDistribution:
         except ValueError:
             return
         raise AssertionError("expected ValueError for an unknown dimension")
+
+
+class TestPlayersInBucket:
+    def test_rating_bucket(self) -> None:
+        # The 1600-1699 band holds only Young Gun (player 2, elo 1600, born 2010).
+        df = players_in_bucket(_con(), "2026-01-01", dimension="rating", bucket_low=1600)
+        assert df["idplayer"].to_list() == [2]
+        row = df.row(0, named=True)
+        assert row["name"] == "Young Gun"
+        assert row["rating"] == 1600
+        assert row["age"] == 16  # 2026 - 2010
+        assert "club" in df.columns
+
+    def test_rating_bucket_excludes_neighbours(self) -> None:
+        # Old Strong (2200) is in its own band, not the 1900 one.
+        df = players_in_bucket(_con(), "2026-01-01", dimension="rating", bucket_low=1900)
+        assert df["idplayer"].to_list() == [3]  # Foreign Fem (1900) only
+
+    def test_strongest_first(self) -> None:
+        # A wide bin lands several in one band; they come back strongest first.
+        # bin 1000 -> band [1000,2000) holds 1900 (p3) and 1600 (p2).
+        df = players_in_bucket(
+            _con(), "2026-01-01", dimension="rating", bucket_low=1000, bin_size=1000
+        )
+        assert df["idplayer"].to_list() == [3, 2]  # 1900 (player3) before 1600 (player2)
+
+    def test_unrated_bucket(self) -> None:
+        con = _con()
+        con.execute(
+            f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            ["2026-01-01", 9, "No Rating", "M", "1992-01-01", True, False, False, "V", 10, 0],
+        )
+        df = players_in_bucket(con, "2026-01-01", dimension="rating", bucket_low=None)
+        assert df["idplayer"].to_list() == [9]
+        assert df.row(0, named=True)["rating"] is None  # unrated -> NULL rating
+
+    def test_age_bucket(self) -> None:
+        # 30-39 cohort: Foreign Fem (1995->31) and Club20 Member (1990->36).
+        df = players_in_bucket(_con(), "2026-01-01", dimension="age", bucket_low=30)
+        assert sorted(df["idplayer"].to_list()) == [3, 4]
+
+    def test_club_and_region_scope(self) -> None:
+        c = players_in_bucket(_con(), "2026-01-01", dimension="rating", bucket_low=1900, idclub=10)
+        assert c["idplayer"].to_list() == [3]
+        f = players_in_bucket(_con(), "2026-01-01", dimension="rating", bucket_low=2000, region="F")
+        assert f["idplayer"].to_list() == [4]
+
+    def test_tenure_bucket(self) -> None:
+        con = connect(":memory:")
+        ins = f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+        rows = [
+            ("2018-01-01", 1, "Vet", "M", "1980-01-01", True, False, False, "V", 10, 2000),
+            ("2026-01-01", 1, "Vet", "M", "1980-01-01", True, False, False, "V", 10, 2000),
+            ("2026-01-01", 2, "New", "M", "2000-01-01", True, False, False, "V", 10, 1500),
+        ]
+        for r in rows:
+            con.execute(ins, list(r))
+        # The 0-1 tenure band is the newcomer; the veteran sits in the ~8y band.
+        df = players_in_bucket(con, "2026-01-01", dimension="tenure", bucket_low=0)
+        assert df["idplayer"].to_list() == [2]
+        assert df.row(0, named=True)["since"] == 2026  # joined in 2026
+        vet = players_in_bucket(con, "2026-01-01", dimension="tenure", bucket_low=8)
+        assert vet["idplayer"].to_list() == [1]
+        assert vet.row(0, named=True)["since"] == 2018
+
+    def test_unrated_bucket_for_non_rating_raises(self) -> None:
+        for dim in ("age", "tenure"):
+            try:
+                players_in_bucket(_con(), "2026-01-01", dimension=dim, bucket_low=None)
+            except ValueError:
+                continue
+            raise AssertionError(f"expected ValueError for {dim} with bucket_low=None")
+
+    def test_invalid_dimension_raises(self) -> None:
+        try:
+            players_in_bucket(_con(), "2026-01-01", dimension="height", bucket_low=0)
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for an unknown dimension")
+
+
+class TestRetention:
+    @staticmethod
+    def _retention_con():
+        # Seasons 2020/21..2023/24, anchored on October snapshots (month >= 7, so
+        # season-year == calendar year). 2020 is the first season -> its cohorts
+        # are left-censored. Club 10 measurable cohorts: 2021/22 and 2022/23.
+        con = connect(":memory:")
+        ins = f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+        rows = [
+            # p1 junior+rated: joins 2021/22, stays through 2023/24 -> retained +1,+2
+            ("2021-10-01", 1, "P1", "M", "2010-01-01", True, False, False, "V", 10, 1500),
+            ("2022-10-01", 1, "P1", "M", "2010-01-01", True, False, False, "V", 10, 1550),
+            ("2023-10-01", 1, "P1", "M", "2010-01-01", True, False, False, "V", 10, 1600),
+            # p2 adult+rated: joins 2021/22, leaves after -> churns at +1
+            ("2021-10-01", 2, "P2", "M", "1990-01-01", True, False, False, "V", 10, 1800),
+            # p3 adult+unrated: joins 2022/23, stays 2023/24 -> retained +1
+            ("2022-10-01", 3, "P3", "F", "1985-01-01", True, False, False, "V", 10, 0),
+            ("2023-10-01", 3, "P3", "F", "1985-01-01", True, False, False, "V", 10, 0),
+            # p4: present in the first season (2020/21) -> left-censored, excluded
+            ("2020-10-01", 4, "P4", "M", "2008-01-01", True, False, False, "V", 10, 0),
+            ("2023-10-01", 4, "P4", "M", "2008-01-01", True, False, False, "V", 10, 1200),
+            # p5 adult: joins club 10 in 2021/22, switches to club 20 -> churn for 10
+            ("2021-10-01", 5, "P5", "M", "1995-01-01", True, False, False, "V", 10, 1700),
+            ("2022-10-01", 5, "P5", "M", "1995-01-01", True, False, False, "V", 20, 1700),
+            ("2023-10-01", 5, "P5", "M", "1995-01-01", True, False, False, "V", 20, 1700),
+        ]
+        for r in rows:
+            con.execute(ins, list(r))
+        return con
+
+    def test_triangle_and_censoring(self) -> None:
+        df = club_retention(self._retention_con(), 10)
+        rows = {r["cohort"]: r for r in df.to_dicts()}
+        # 2021/22: P1, P2, P5 (P4 excluded as left-censored); only P1 stays.
+        assert rows["2021/22"]["size"] == 3
+        assert rows["2021/22"]["+1y"] == 33.3  # 1 of 3
+        assert rows["2021/22"]["+2y"] == 33.3
+        # 2022/23: P3 only; +2y is right-censored (2024/25 unseen) -> null.
+        assert rows["2022/23"]["size"] == 1
+        assert rows["2022/23"]["+1y"] == 100.0
+        assert rows["2022/23"]["+2y"] is None
+
+    def test_season_label_collapses_quarters(self) -> None:
+        # The four snapshot quarters of one season (Jul/Oct/Jan/Apr) must form a
+        # single cohort, not split a Jan-joiner into the next calendar year.
+        con = connect(":memory:")
+        ins = f"INSERT INTO player_snapshots ({COLS}) VALUES (?,?,?,?,?,?,?,?,?,?,?)"
+        rows = [
+            # founder in season 2023/24 -> first season, left-censored
+            ("2023-10-01", 9, "F", "M", "1980-01-01", True, False, False, "V", 10, 2000),
+            # X across Oct/Jan/Apr of 2024/25 (one season!), back next season -> +1
+            ("2024-10-01", 1, "X", "M", "1990-01-01", True, False, False, "V", 10, 1500),
+            ("2025-01-01", 1, "X", "M", "1990-01-01", True, False, False, "V", 10, 1500),
+            ("2025-04-01", 1, "X", "M", "1990-01-01", True, False, False, "V", 10, 1500),
+            ("2025-10-01", 1, "X", "M", "1990-01-01", True, False, False, "V", 10, 1500),
+            # Y joins same season (Jan only), gone next season -> churn
+            ("2025-01-01", 2, "Y", "F", "1990-01-01", True, False, False, "V", 10, 1400),
+        ]
+        for r in rows:
+            con.execute(ins, list(r))
+        df = club_retention(con, 10)
+        # One cohort labelled as a season span; X's Jan/Apr appearance does NOT
+        # spawn a separate 2025/26 cohort.
+        assert df["cohort"].to_list() == ["2024/25"]
+        assert df.to_dicts()[0]["size"] == 2  # X and Y, one season
+        assert df.to_dicts()[0]["+1y"] == 50.0  # only X returns
+
+    def test_switcher_counts_as_churn(self) -> None:
+        # P5 switched to club 20 the next season, so it must NOT count as retained.
+        df = club_retention(self._retention_con(), 10)
+        assert {r["cohort"]: r["+1y"] for r in df.to_dicts()}["2021/22"] == 33.3
+
+    def test_split_by_age_groups_and_order(self) -> None:
+        df = club_retention(self._retention_con(), 10, by="age")
+        assert df.columns[0] == "group"
+        recs = [(r["group"], r["cohort"]) for r in df.to_dicts()]
+        # juniors come before adults (display order, not alphabetical).
+        assert recs[0] == ("junior", "2021/22")
+        by_grp = {(r["group"], r["cohort"]): r for r in df.to_dicts()}
+        assert by_grp[("junior", "2021/22")]["+1y"] == 100.0  # P1 stays
+        assert by_grp[("adult", "2021/22")]["+1y"] == 0.0  # P2, P5 both gone
+
+    def test_max_horizon_caps_columns(self) -> None:
+        df = club_retention(self._retention_con(), 10, max_horizon=1)
+        assert [c for c in df.columns if c.startswith("+")] == ["+1y"]
+
+    def test_empty_club_returns_empty_frame(self) -> None:
+        df = club_retention(self._retention_con(), 999)
+        assert df.is_empty()
+        assert df.columns == ["cohort", "size"]
+
+    def test_invalid_by_raises(self) -> None:
+        try:
+            club_retention(self._retention_con(), 10, by="height")
+        except ValueError:
+            return
+        raise AssertionError("expected ValueError for an unknown by=")
 
 
 class TestLatestPeriod:
