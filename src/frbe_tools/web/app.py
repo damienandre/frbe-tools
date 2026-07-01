@@ -565,7 +565,7 @@ def _register_routes(app: FastAPI) -> None:
             _base(request, columns=cols, rows=rows, links={"idplayer": "/players/{}"}, period=per),
         )
 
-    # ---- Retention (join-year cohort triangle + curves) ------------------ #
+    # ---- Retention (join-season cohort triangle + curves) ---------------- #
     def _retention_params(
         club: Annotated[str | None, Query()] = None,
         status: StatusQ = "member",

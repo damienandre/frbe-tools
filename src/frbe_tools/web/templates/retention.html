@@ -32,6 +32,8 @@
   <div class="card"><canvas id="retChart"></canvas></div>
 </div>
 {% include "_table.html" %}
+<p class="muted">A row with no +Ny values is a season too recent to have an observable next
+  season yet (not missing data) — its members can only be counted once a later snapshot lands.</p>
 {% else %}
 <p class="muted">No measurable cohorts for this club (too little history, or all members predate the data).</p>
 {% endif %}

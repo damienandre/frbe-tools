@@ -385,6 +385,17 @@ class TestRetention:
         assert by_grp[("junior", "2021/22")]["+1y"] == 100.0  # P1 stays
         assert by_grp[("adult", "2021/22")]["+1y"] == 0.0  # P2, P5 both gone
 
+    def test_split_by_rated_groups_and_order(self) -> None:
+        # Locks the non-age group SQL path: rated before unrated.
+        df = club_retention(self._retention_con(), 10, by="rated")
+        recs = [(r["group"], r["cohort"]) for r in df.to_dicts()]
+        assert recs[0][0] == "rated"  # display order, rated first
+        by_grp = {(r["group"], r["cohort"]): r for r in df.to_dicts()}
+        # 2021/22 rated: P1, P2, P5 -> only P1 stays. 2022/23 unrated: P3 (elo 0).
+        assert by_grp[("rated", "2021/22")]["size"] == 3
+        assert by_grp[("rated", "2021/22")]["+1y"] == 33.3
+        assert by_grp[("unrated", "2022/23")]["+1y"] == 100.0
+
     def test_max_horizon_caps_columns(self) -> None:
         df = club_retention(self._retention_con(), 10, max_horizon=1)
         assert [c for c in df.columns if c.startswith("+")] == ["+1y"]
