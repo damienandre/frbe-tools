@@ -281,6 +281,199 @@ def club_history(
     ).pl()
 
 
+def _season_year(col: str) -> str:
+    """SQL: the season-start year for the snapshot date in column ``col``.
+
+    A playing season spans the Jul/Oct/Jan/Apr snapshot quarters, so it straddles
+    two calendar years (Jul 2024 … Apr 2025). Shifting the date back six months
+    collapses those four quarters onto a single year (→ 2024), so an Oct-joiner
+    and a Jan-joiner land in the *same* cohort instead of being split across the
+    new-year boundary. The integer it returns (2024) is rendered as ``2024/25``.
+    """
+    return f"CAST(extract('year' FROM {col} - INTERVAL 6 MONTH) AS INTEGER)"
+
+
+# How `club_retention(by=...)` splits a cohort, keyed by the `by` value. Each
+# entry is (SQL expression evaluated over the player's join-season snapshot `ps`,
+# display order of the groups). The age bands read `e.join_year` from the
+# `eligible` CTE (age *at the moment of joining*, not today).
+_RETENTION_GROUPS: dict[str, tuple[str, list[str]]] = {
+    "sex": ("ps.sex", ["M", "F"]),
+    "rated": ("CASE WHEN ps.elo > 0 THEN 'rated' ELSE 'unrated' END", ["rated", "unrated"]),
+    "age": (
+        "CASE WHEN ps.birthday IS NULL THEN 'unknown' "
+        "WHEN e.join_year - extract('year' FROM ps.birthday) < 18 THEN 'junior' "
+        "WHEN e.join_year - extract('year' FROM ps.birthday) < 50 THEN 'adult' "
+        "ELSE 'senior' END",
+        ["junior", "adult", "senior", "unknown"],
+    ),
+}
+
+
+def club_retention(
+    con: duckdb.DuckDBPyConnection,
+    idclub: int,
+    *,
+    statuses: tuple[str, ...] = ("member",),
+    by: str | None = None,
+    max_horizon: int | None = None,
+) -> pl.DataFrame:
+    """Cohort-retention triangle for one club: do new members stay?
+
+    Members are grouped into **join-season cohorts** — the first *season* a
+    player appears at ``idclub`` with a matching status. A season runs Jul-Jun
+    (the Jul/Oct/Jan/Apr snapshot quarters, which straddle the new year), so an
+    autumn and a winter joiner of the same playing season share one cohort,
+    labelled ``2024/25`` (see ``_season_year``). For each cohort the row reports
+    its size and the share still a member of *this* club ``+1y``, ``+2y``, …
+    seasons later (point-in-time: present in *that* season, lapses in between not
+    bridged). The ``+1y`` column is the headline "what fraction of first-season
+    members come back the next season?" number.
+
+    Retention is **same-club**: a player who switches to another club counts as
+    churned here (use ``rank_rating_changes`` / the player view to see where they
+    went). Deaths are *not* special-cased — a member who dies simply stops
+    appearing, counting as churn from that season.
+
+    Two censoring rules keep the numbers honest:
+
+    - *Left:* the earliest cohort in the data is dropped — a player present in the
+      first loaded season may be a long-standing member misread as a new joiner,
+      so their "join" season is unknowable. (Beware the DBF→SQLite gap, ~2018: a
+      reappearance across it can masquerade as a fresh join.)
+    - *Right:* a cohort is only measured at horizons that have actually elapsed by
+      the last loaded season; not-yet-observable cells are left ``NULL`` (blank),
+      never 0.
+
+    ``by`` optionally splits each cohort by an attribute *at join time* —
+    ``"sex"`` (M/F), ``"rated"`` (had an Elo vs not), or ``"age"`` (junior <18 /
+    adult / senior 50+ birth-year cohort) — to compare who stays. ``max_horizon``
+    caps the number of ``+Ny`` columns.
+
+    Returns a wide frame: ``[group]`` (only when ``by`` is set), ``cohort`` (join
+    season, e.g. ``2024/25``), ``size``, then ``+1y … +Ky`` retention
+    percentages. Ordered by group then cohort. Empty if the club has no
+    measurable cohort.
+    """
+    if by is not None and by not in _RETENTION_GROUPS:
+        raise ValueError(f"Unknown by={by!r}; expected one of {', '.join(_RETENTION_GROUPS)}.")
+
+    status_sql, status_params = _status_clause(statuses)
+
+    season = _season_year("period")
+    bounds = con.execute(f"SELECT min({season}), max({season}) FROM player_snapshots").fetchone()
+    if bounds is None or bounds[0] is None:
+        raise ValueError("No snapshots loaded; run `frbe db build` first.")
+    first_year, last_year = bounds
+
+    # Earliest eligible (non-left-censored) cohort, so we know how many horizons
+    # to generate. A separate cheap query keeps the main query's bounds literal.
+    row = con.execute(
+        f"""
+        WITH mem AS (
+            SELECT DISTINCT idplayer, {season} AS yr
+            FROM player_snapshots ps
+            WHERE ps.idclub = ? AND {status_sql}
+        )
+        SELECT min(join_year) FROM (
+            SELECT idplayer, min(yr) AS join_year FROM mem GROUP BY idplayer
+        ) WHERE join_year > ?
+        """,
+        [idclub, *status_params, first_year],
+    ).fetchone()
+    min_cohort = row[0] if row else None
+
+    group_order = _RETENTION_GROUPS[by][1] if by else []
+    if min_cohort is None:  # no cohort after the left-censored first year
+        schema: dict[str, Any] = {"group": pl.Utf8} if by else {}
+        schema |= {"cohort": pl.Utf8, "size": pl.Int64}
+        return pl.DataFrame(schema=schema)
+
+    horizon = max(0, last_year - min_cohort)
+    if max_horizon is not None:
+        horizon = min(horizon, max(0, int(max_horizon)))
+
+    if by:
+        grp_expr = _RETENTION_GROUPS[by][0]
+        grp_sel, grp_grp = "g.grp AS grp, ", "g.grp, "
+        join_grp = f""",
+        join_grp AS (
+            SELECT e.idplayer, e.join_year, {grp_expr} AS grp
+            FROM eligible e
+            JOIN player_snapshots ps
+              ON ps.idplayer = e.idplayer AND ps.idclub = ?
+             AND {_season_year("ps.period")} = e.join_year
+            QUALIFY row_number() OVER (PARTITION BY e.idplayer ORDER BY ps.period) = 1
+        )"""
+        from_src, extra_params = "join_grp g", [idclub]
+    else:
+        grp_sel = grp_grp = join_grp = ""
+        from_src, extra_params = "eligible g", []
+
+    # SECURITY: first_year/last_year/horizon are interpolated, not bound — safe
+    # only because all three are ints straight out of DuckDB / int(max_horizon).
+    sql = f"""
+        WITH mem AS (
+            SELECT DISTINCT idplayer, {season} AS yr
+            FROM player_snapshots ps
+            WHERE ps.idclub = ? AND {status_sql}
+        ),
+        cohort AS (SELECT idplayer, min(yr) AS join_year FROM mem GROUP BY idplayer),
+        eligible AS (
+            SELECT idplayer, join_year FROM cohort WHERE join_year > {first_year}
+        ){join_grp},
+        horizons AS (SELECT h FROM generate_series(0, {horizon}) t(h))
+        SELECT {grp_sel}g.join_year AS cohort, hz.h AS horizon,
+               count(*) AS size, count(m.idplayer) AS retained
+        FROM {from_src}
+        CROSS JOIN horizons hz
+        LEFT JOIN mem m ON m.idplayer = g.idplayer AND m.yr = g.join_year + hz.h
+        WHERE g.join_year + hz.h <= {last_year}
+        GROUP BY {grp_grp}g.join_year, hz.h
+        ORDER BY {grp_grp}cohort, horizon
+    """
+    long = con.execute(sql, [idclub, *status_params, *extra_params]).pl()
+    if long.is_empty():
+        schema = {"group": pl.Utf8} if by else {}
+        schema |= {"cohort": pl.Utf8, "size": pl.Int64}
+        return pl.DataFrame(schema=schema)
+
+    index_cols = (["grp"] if by else []) + ["cohort", "size"]
+    # Pivot horizons into +Ny columns. Keeping +0y (always 100%) in the pivot
+    # guarantees every cohort surfaces (it always has an h=0 row); drop it after.
+    wide = (
+        long.with_columns(pct=(100.0 * pl.col("retained") / pl.col("size")).round(1))
+        .with_columns(hcol=pl.format("+{}y", pl.col("horizon")))
+        .pivot(on="hcol", index=index_cols, values="pct")
+    )
+    hcols = [c for h in range(1, horizon + 1) if (c := f"+{h}y") in wide.columns]
+    wide = wide.select([*index_cols, *hcols])
+
+    if by:
+        order_map = {g: i for i, g in enumerate(group_order)}
+        wide = (
+            wide.rename({"grp": "group"})
+            .with_columns(
+                _o=pl.col("group").replace_strict(
+                    order_map, default=len(order_map), return_dtype=pl.Int64
+                )
+            )
+            .sort(["_o", "cohort"])
+            .drop("_o")
+        )
+    else:
+        wide = wide.sort("cohort")
+    # Relabel the integer season-start year as a "2024/25" span (done last, so the
+    # numeric sort above still orders the rows chronologically).
+    return wide.with_columns(
+        cohort=pl.format(
+            "{}/{}",
+            pl.col("cohort"),
+            ((pl.col("cohort") + 1) % 100).cast(pl.Utf8).str.zfill(2),
+        )
+    )
+
+
 def _tenure_sql(
     period: dt.date | str,
     status_sql: str,
@@ -433,6 +626,118 @@ def player_distribution(
         players="players",
         pct=(100.0 * pl.col("players") / total).round(1) if total else pl.lit(0.0),
     )
+
+
+def players_in_bucket(
+    con: duckdb.DuckDBPyConnection,
+    period: dt.date | str,
+    *,
+    dimension: str = "rating",
+    bucket_low: int | None,
+    statuses: tuple[str, ...] = ("member",),
+    idclub: int | None = None,
+    region: str | None = None,
+    bin_size: int | None = None,
+    age_year: int | None = None,
+) -> pl.DataFrame:
+    """List the individual players that fall in a single distribution bucket.
+
+    The drill-down counterpart to ``player_distribution``: same ``period``,
+    ``dimension``, scope (``idclub`` / ``region``) and ``bin_size``, but instead
+    of a histogram it returns the players inside *one* bucket, identified by its
+    lower bound ``bucket_low`` — the band's first value (e.g. ``1600`` for the
+    ``1600-1699`` Elo band, ``10`` for the ``10-19`` age cohort, ``0`` for the
+    ``0-1`` tenure band). Pass ``bucket_low=None`` for the rating ``unrated``
+    bucket (``elo`` NULL or ``<= 0``); ``age``/``tenure`` have no such bucket, so
+    ``None`` there is an error.
+
+    Players are ordered strongest first. Columns: idplayer, name, age (birth-year
+    cohort, NULL when the birthday is unknown), rating (NULL for unrated), club
+    (name), plus ``since`` (the year they joined their current club) for the
+    ``tenure`` dimension.
+    """
+    if dimension not in ("rating", "age", "tenure"):
+        raise ValueError(f"Unknown dimension {dimension!r}; expected 'rating', 'age', or 'tenure'.")
+    if bucket_low is None and dimension != "rating":
+        raise ValueError(f"{dimension!r} buckets have no 'unrated' band; pass an int bucket_low.")
+
+    status_sql, status_params = _status_clause(statuses)
+    _defaults = {"rating": 100, "age": 10, "tenure": 2}
+    width = int(bin_size) if bin_size is not None else _defaults[dimension]
+    if width <= 0:
+        raise ValueError("bin_size must be a positive integer.")
+    # SECURITY: year and width are interpolated into the SQL, not bound — safe only
+    # because both are guaranteed ints (see player_distribution). Keep them ints.
+    year = age_year if age_year is not None else _period_year(period)
+    age_expr = f"({year} - extract('year' FROM ps.birthday))"
+    detail = (
+        f"ps.name AS name, "
+        f"CASE WHEN ps.birthday IS NOT NULL THEN {age_expr} END AS age, "
+        "CASE WHEN ps.elo > 0 THEN ps.elo END AS rating"
+    )
+
+    if dimension == "tenure":
+        scope = ["ps.period = ?", status_sql, "ps.idclub IS NOT NULL"]
+        params: list[Any] = [period, *status_params]
+        if idclub is not None:
+            scope.append("ps.idclub = ?")
+            params.append(idclub)
+        if region is not None:
+            scope.append("ps.region = ?")
+            params.append(region)
+        params += [period, period, period, bucket_low]
+        sql = f"""
+            WITH at_period AS (
+                SELECT idplayer, idclub
+                FROM player_snapshots ps
+                WHERE {" AND ".join(scope)}
+            ),
+            joined AS (
+                SELECT a.idplayer, a.idclub, min(h.period) AS joined_period
+                FROM at_period a
+                JOIN player_snapshots h
+                  ON h.idplayer = a.idplayer AND h.idclub = a.idclub AND h.period <= ?
+                GROUP BY a.idplayer, a.idclub
+            )
+            SELECT j.idplayer AS idplayer, {detail},
+                   CAST(extract('year' FROM j.joined_period) AS INTEGER) AS since,
+                   {_CLUB_NAME} AS club
+            FROM joined j
+            JOIN player_snapshots ps ON ps.idplayer = j.idplayer AND ps.period = ?
+            LEFT JOIN clubs c ON c.idclub = ps.idclub
+            WHERE CAST(floor(date_diff('day', j.joined_period, CAST(? AS DATE))::DOUBLE
+                             / 365.0 / {width}) * {width} AS INTEGER) = ?
+            ORDER BY rating DESC NULLS LAST, name
+        """
+        return con.execute(sql, params).pl()
+
+    where = ["ps.period = ?", status_sql]
+    params = [period, *status_params]
+    if idclub is not None:
+        where.append("ps.idclub = ?")
+        params.append(idclub)
+    if region is not None:
+        where.append("ps.region = ?")
+        params.append(region)
+    if dimension == "rating":
+        if bucket_low is None:
+            where.append("(ps.elo IS NULL OR ps.elo <= 0)")
+        else:
+            where.append("ps.elo > 0 AND ps.elo >= ? AND ps.elo < ?")
+            params += [bucket_low, bucket_low + width]
+    else:  # age (bucket_low is non-None — the top guard rejects None for non-rating)
+        assert bucket_low is not None
+        where.append("ps.birthday IS NOT NULL")
+        where.append(f"{age_expr} >= ? AND {age_expr} < ?")
+        params += [bucket_low, bucket_low + width]
+    sql = f"""
+        SELECT ps.idplayer AS idplayer, {detail}, {_CLUB_NAME} AS club
+        FROM player_snapshots ps
+        LEFT JOIN clubs c ON c.idclub = ps.idclub
+        WHERE {" AND ".join(where)}
+        ORDER BY rating DESC NULLS LAST, name
+    """
+    return con.execute(sql, params).pl()
 
 
 def rank_rating_changes(

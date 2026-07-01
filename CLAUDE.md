@@ -22,6 +22,7 @@ uv run frbe db build                   # ingest player dumps + clubs into DuckDB
 uv run frbe db info                    # summarize the database
 uv run frbe analyze clubs --max-age 19 # rank clubs (here: youth); also strength/growth/player/movers
 uv run frbe analyze distribution rating --region F  # histogram of players by rating (or age)
+uv run frbe analyze retention 351 --by age          # do a club's new members stay? (cohort retention)
 uv run frbe web                        # local dashboard at http://127.0.0.1:8080
 uv run python -m frbe_tools --help     # module entry point
 uv run ruff check                      # lint
@@ -70,9 +71,16 @@ import error, the venv got re-hidden — recreate it: `rm -rf "$UV_PROJECT_ENVIR
   `player_rating_evolution`, `rank_rating_changes`, `player_distribution`
   (histogram of players by rating, age or club tenure, scoped to a club /
   region-federation / global; rating keeps unrated as its own bucket, tenure is
-  years since first joining the current club). Ages use
-  **birth-year cohorts** (`year - birth_year`). Status presets in
-  `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
+  years since first joining the current club), `players_in_bucket` (the
+  drill-down counterpart: the individual players inside one distribution bucket,
+  identified by its lower bound — same scope/bin params), `club_retention`
+  (join-**season** cohort retention triangle for one club: of members who first
+  joined in a season — labelled `2024/25`, the Jul/Oct/Jan/Apr snapshot quarters
+  grouped via `_season_year`, *not* calendar years — the % still members of *that*
+  club +1y/+2y/… seasons later — point-in-time, same-club, left- *and*
+  right-censored; optional `by` split on sex/rated/age at join time). Ages use
+  **birth-year cohorts** (`year - birth_year`). Status
+  presets in `STATUS_PRESETS` (member/registered/free_license/unaffiliated/all).
 - **`web/`** — local dashboard (FastAPI + Jinja2 + HTMX), a thin presentation
   layer over `analysis/rankings.py`. `app.create_app(settings)` is the factory
   (plus a module-level `app` for `uvicorn …:app`); routes return full pages and

@@ -6,6 +6,7 @@
   <label>Month <input type="number" name="month" min="1" max="12" value="{{ month if month is not none else '' }}" placeholder="all"></label>
   <label>Youth age <input type="number" name="youth_age" min="0" max="120" value="{{ youth_age }}"></label>
   <button type="submit">Apply</button>
+  <a class="btn" href="/retention?club={{ idclub }}">retention →</a>
   <a class="btn" href="/clubs">← all clubs</a>
 </form>
 {% if rows %}

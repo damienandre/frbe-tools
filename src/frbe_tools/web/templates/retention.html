@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Retention · frbe-tools{% endblock %}
+{% block content %}
+<h1>Member retention{% if name %} <span class="muted">· {{ name }}</span>{% endif %}</h1>
+<p class="muted">Each <strong>cohort</strong> row is the members who first joined the club in
+  that <strong>season</strong> (labelled <code>2024/25</code>; the Jul/Oct/Jan/Apr
+  snapshots of one playing season are counted together). <strong>+1y, +2y, …</strong>
+  give the share of that cohort still a member of <em>this</em> club one, two, …
+  seasons later — a switch to another club counts as leaving. Cohorts are
+  left-censored (the earliest season is dropped, as its joiners can't be told from
+  long-standing members) and right-censored (blank = not yet observable).</p>
+<form class="filters" method="get" action="/retention">
+  <label>Club <input type="number" name="club" value="{{ club if club is not none else '' }}" placeholder="club id" required></label>
+  <label>Status
+    <select name="status">
+      {% for s in presets %}<option value="{{ s }}" {{ 'selected' if form.status == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Split by
+    <select name="by">
+      {% for s in splits %}<option value="{{ s }}" {{ 'selected' if by == s }}>{{ s }}</option>{% endfor %}
+    </select>
+  </label>
+  <label>Max years <input type="number" name="max" min="1" max="50" value="{{ form.max_horizon if form.max_horizon is not none else '' }}" placeholder="all"></label>
+  <button type="submit">Apply</button>
+  {% if club is not none %}<a class="btn" href="/clubs/{{ club }}">club page →</a>{% endif %}
+</form>
+{% if club is none %}
+<p class="muted">Enter a club id to see its retention. Tip: find ids on the <a href="/clubs">Clubs</a> page.</p>
+{% elif rows %}
+<div class="charts">
+  <div class="card"><canvas id="retChart"></canvas></div>
+</div>
+{% include "_table.html" %}
+<p class="muted">A row with no +Ny values is a season too recent to have an observable next
+  season yet (not missing data) — its members can only be counted once a later snapshot lands.</p>
+{% else %}
+<p class="muted">No measurable cohorts for this club (too little history, or all members predate the data).</p>
+{% endif %}
+{% endblock %}
+{% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
+{% block scripts %}
+<script id="chart-data" type="application/json">{{ chart | safe }}</script>
+<script>
+  const d = JSON.parse(document.getElementById('chart-data').textContent);
+  if (d.series && d.series.length) {
+    new Chart(document.getElementById('retChart'), {
+      type: 'line',
+      data: {
+        labels: d.labels,
+        datasets: d.series.map(s => ({ label: s.label, data: s.data, tension: 0.3, spanGaps: false })),
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: '% retained' } } },
+      }
+    });
+  }
+</script>
+{% endblock %}

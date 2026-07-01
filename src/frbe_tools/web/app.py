@@ -11,6 +11,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 import math
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Annotated, Any
@@ -26,9 +27,11 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from frbe_tools.analysis.rankings import (
     STATUS_PRESETS,
     club_history,
+    club_retention,
     latest_period,
     player_distribution,
     player_rating_evolution,
+    players_in_bucket,
     rank_clubs,
     rank_clubs_by_growth,
     rank_clubs_by_strength,
@@ -108,6 +111,21 @@ def _opt_int(raw: str | None, *, lo: int | None = None, hi: int | None = None) -
     if hi is not None:
         n = min(hi, n)
     return n
+
+
+def _bucket_low(label: str) -> int | None:
+    """Parse a distribution bucket label back to its lower bound.
+
+    Inverse of the ``{low}-{high}`` label that ``player_distribution`` emits, so
+    the drill-down route can re-derive which band a row stands for. The rating
+    ``unrated`` bucket has no numeric bound and maps to ``None``. The leading
+    bound is matched as a signed integer so a negative-age cohort (label like
+    ``-10--1``, from a future-dated birthday) parses instead of crashing.
+    """
+    if label == "unrated":
+        return None
+    m = re.match(r"-?\d+", label)
+    return int(m.group()) if m else None
 
 
 def _density_curve(counts: list[int], *, bandwidth: float = 1.0) -> list[float]:
@@ -201,9 +219,11 @@ _NAV = [
     ("/growth", "Growth"),
     ("/movers", "Movers"),
     ("/distribution", "Distribution"),
+    ("/retention", "Retention"),
 ]
 
 DISTRIBUTION_DIMENSIONS = ("rating", "age", "tenure")
+RETENTION_SPLITS = ("none", "sex", "rated", "age")
 
 
 def _base(request: Request, **ctx: Any) -> dict[str, Any]:
@@ -462,7 +482,10 @@ def _register_routes(app: FastAPI) -> None:
             bin_size=p["bin_size"],
             include_unrated=not p["hide_unrated"],
         )
-        cols, rows = df_to_table(df)
+        _cols, rows = df_to_table(df)
+        # Carry each bucket's lower bound so the template can build the drill-down
+        # link (/distribution/players?...&low=...) for the expandable row.
+        buckets = [{**r, "low": _bucket_low(r["bucket"])} for r in rows]
         labels = [r["bucket"] for r in rows]
         players = [r["players"] for r in rows]
         # Smooth a density curve over the numeric bands only; the categorical
@@ -484,6 +507,123 @@ def _register_routes(app: FastAPI) -> None:
                 dimension=dimension,
                 presets=list(STATUS_PRESETS),
                 dimensions=DISTRIBUTION_DIMENSIONS,
+                buckets=buckets,
+                chart=json.dumps(chart),
+            ),
+        )
+
+    def _distribution_players_params(
+        dimension: Annotated[str, Query()] = "rating",
+        period: PeriodQ = None,
+        club: Annotated[str | None, Query()] = None,
+        region: Annotated[str, Query()] = "any",
+        status: StatusQ = "member",
+        bin_size: Annotated[str | None, Query(alias="bin")] = None,
+        low: Annotated[str | None, Query()] = None,
+    ) -> dict[str, Any]:
+        # Mirrors _distribution_params; ``low`` is the bucket's lower bound (blank
+        # = the rating "unrated" bucket). Strings degrade to "no filter" via _opt_int.
+        return {
+            "dimension": dimension,
+            "period": period,
+            "club": _opt_int(club),
+            "region": region,
+            "status": status,
+            "bin_size": _opt_int(bin_size, lo=1, hi=1000),
+            "low": low,
+        }
+
+    @app.get("/distribution/players", response_class=HTMLResponse)
+    def distribution_players(
+        request: Request, db: DbDep, p: dict = Depends(_distribution_players_params)
+    ):
+        per = parse_period(db, p["period"])
+        dimension = p["dimension"] if p["dimension"] in DISTRIBUTION_DIMENSIONS else "rating"
+        low = _opt_int(p["low"])
+        # age/tenure have no "unrated" bucket; a missing bound means nothing to show.
+        if low is None and dimension != "rating":
+            cols: list[str] = []
+            rows: list[dict[str, Any]] = []
+        else:
+            df = players_in_bucket(
+                db,
+                per,
+                dimension=dimension,
+                bucket_low=low,
+                statuses=statuses_for(p["status"]),
+                idclub=p["club"],
+                region=_none(p["region"]),
+                bin_size=p["bin_size"],
+            )
+            # Club is redundant when the scope is already a single club; drop it.
+            if p["club"] is not None and "club" in df.columns:
+                df = df.drop("club")
+            cols, rows = df_to_table(df)
+        return TEMPLATES.TemplateResponse(
+            request,
+            "_table.html",
+            _base(request, columns=cols, rows=rows, links={"idplayer": "/players/{}"}, period=per),
+        )
+
+    # ---- Retention (join-season cohort triangle + curves) ---------------- #
+    def _retention_params(
+        club: Annotated[str | None, Query()] = None,
+        status: StatusQ = "member",
+        by: Annotated[str, Query()] = "none",
+        max_horizon: Annotated[str | None, Query(alias="max")] = None,
+    ) -> dict[str, Any]:
+        # club/max arrive as strings so blank form fields degrade to "no filter"
+        # instead of 422-ing the page (see _opt_int / _distribution_params).
+        return {
+            "club": _opt_int(club),
+            "status": status,
+            "by": by,
+            "max_horizon": _opt_int(max_horizon, lo=1, hi=50),
+        }
+
+    @app.get("/retention", response_class=HTMLResponse)
+    def retention_page(request: Request, db: DbDep, p: dict = Depends(_retention_params)):
+        # Unknown split degrades to "none" rather than 400-ing (cf. dimension).
+        by = p["by"] if p["by"] in RETENTION_SPLITS else "none"
+        rows: list[dict[str, Any]] = []
+        cols: list[str] = []
+        chart: dict[str, Any] = {"labels": [], "series": []}
+        name = None
+        if p["club"] is not None:
+            df = club_retention(
+                db,
+                p["club"],
+                statuses=statuses_for(p["status"]),
+                by=None if by == "none" else by,
+                max_horizon=p["max_horizon"],
+            )
+            name = scalar(
+                db,
+                "SELECT coalesce(name_short, name_long) FROM clubs WHERE idclub = ?",
+                [p["club"]],
+            )
+            cols, rows = df_to_table(df)
+            # One retention curve per cohort row; x = the +Ny horizon columns.
+            hcols = [c for c in cols if c.startswith("+")]
+            series = [
+                {
+                    "label": (f"{r['group']} " if "group" in r else "") + str(r["cohort"]),
+                    "data": [r[c] for c in hcols],
+                }
+                for r in rows
+            ]
+            chart = {"labels": hcols, "series": series}
+        return TEMPLATES.TemplateResponse(
+            request,
+            "retention.html",
+            _base(
+                request,
+                form=p,
+                club=p["club"],
+                name=name,
+                by=by,
+                presets=list(STATUS_PRESETS),
+                splits=RETENTION_SPLITS,
                 columns=cols,
                 rows=rows,
                 chart=json.dumps(chart),

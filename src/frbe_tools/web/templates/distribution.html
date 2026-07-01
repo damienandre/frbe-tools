@@ -26,17 +26,55 @@
   {% endif %}
   <button type="submit">Apply</button>
 </form>
-{% if rows %}
+{% if buckets %}
 <div class="charts">
   <div class="card"><canvas id="distChart"></canvas></div>
 </div>
+{% set qs = {'dimension': dimension, 'period': form.period or '', 'status': form.status, 'region': form.region, 'club': form.club if form.club is not none else '', 'bin': form.bin_size if form.bin_size is not none else ''} | urlencode %}
+<div class="table-block">
+  <div class="table-actions">
+    <button type="button" class="btn" onclick="copyTableCsv(this)">Copy data</button>
+  </div>
+  <table class="dist-table">
+    <thead>
+      <tr><th>bucket</th><th class="num">players</th><th class="num">pct</th></tr>
+    </thead>
+    <tbody>
+      {% for b in buckets %}
+      <tr>
+        <td>
+          <button type="button" class="expander" aria-expanded="false"
+                  onclick="toggleBucket(this)"
+                  hx-get="/distribution/players?{{ qs }}&low={{ b.low if b.low is not none else '' }}"
+                  hx-target="#bucket-{{ loop.index }}" hx-swap="innerHTML"
+                  hx-trigger="click once">{{ b.bucket }}</button>
+        </td>
+        <td class="num">{{ b.players }}</td>
+        <td class="num">{{ b.pct }}</td>
+      </tr>
+      <tr class="bucket-detail" hidden><td colspan="3" id="bucket-{{ loop.index }}"></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">{{ buckets|length }} bucket(s){% if period is defined %} · as of {{ period }}{% endif %}</p>
+</div>
+{% else %}
+<p class="muted">No results for these filters.</p>
 {% endif %}
-{% include "_table.html" %}
 {% endblock %}
 {% block head %}<script src="/static/chart.umd.min.js"></script>{% endblock %}
 {% block scripts %}
 <script id="chart-data" type="application/json">{{ chart | safe }}</script>
 <script>
+  // Toggle a bucket's drill-down row. HTMX fetches the player list once (click
+  // once); subsequent clicks just show/hide the already-loaded detail row.
+  function toggleBucket(btn) {
+    const detail = btn.closest('tr').nextElementSibling;
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    btn.setAttribute('aria-expanded', String(!detail.hidden));
+  }
+
   const d = JSON.parse(document.getElementById('chart-data').textContent);
   if (d.labels.length) {
     new Chart(document.getElementById('distChart'), {
@@ -51,7 +89,13 @@
         responsive: true,
         interaction: { mode: 'index', intersect: false },
         plugins: { legend: { display: true } },
-        scales: { y: { beginAtZero: true } }
+        scales: { y: { beginAtZero: true } },
+        // Clicking a bar drills into the matching bucket (same order as the rows).
+        onClick: (evt, items) => {
+          if (!items.length) return;
+          const btn = document.querySelectorAll('.dist-table .expander')[items[0].index];
+          if (btn) { btn.click(); btn.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+        }
       }
     });
   }

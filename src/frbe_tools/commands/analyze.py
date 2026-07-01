@@ -11,6 +11,7 @@ import typer
 from frbe_tools.analysis.rankings import (
     STATUS_PRESETS,
     club_history,
+    club_retention,
     latest_period,
     player_distribution,
     player_rating_evolution,
@@ -215,6 +216,39 @@ def distribution(
     else:
         scope = "all clubs"
     typer.echo(f"{dimension.capitalize()} distribution of {status} players in {scope} as of {per}:")
+    _show(df)
+
+
+@app.command()
+def retention(
+    idclub: Annotated[int, typer.Argument(help="Club id.")],
+    status: StatusOpt = "member",
+    by: Annotated[
+        str | None, typer.Option("--by", help="Split cohorts: sex, rated or age.")
+    ] = None,
+    max_horizon: Annotated[
+        int | None, typer.Option("--max-horizon", help="Cap the number of +Ny columns.")
+    ] = None,
+) -> None:
+    """Show join-season cohort retention for one club (do new members stay?).
+
+    Cohorts are seasons (labelled 2024/25): the % of members who first joined in
+    a season that are still members of that club +1, +2, … seasons later.
+    """
+    settings = load_settings()
+    con = connect(settings.db_path)
+    try:
+        df = club_retention(con, idclub, statuses=_statuses(status), by=by, max_horizon=max_horizon)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    if df.is_empty():
+        typer.echo(f"No measurable cohorts for club {idclub}.")
+        raise typer.Exit(code=1)
+    name = scalar(
+        con, "SELECT coalesce(name_short, name_long) FROM clubs WHERE idclub = ?", [idclub]
+    )
+    label = f"{idclub}{f' ({name})' if name else ''}{f' by {by}' if by else ''}"
+    typer.echo(f"{status.capitalize()} retention for club {label}:")
     _show(df)
 
 
